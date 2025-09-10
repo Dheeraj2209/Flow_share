@@ -45,6 +45,18 @@ jobs:
           STATIC_EXPORT: 1
         run: npm run build
 
+      - name: Ensure Next assets are present in out
+        run: |
+          mkdir -p out/_next/static
+          if [ -d .next/static ]; then rsync -a .next/static/ out/_next/static/; fi
+          if [ -d public ]; then rsync -a public/ out/; fi
+          if [ -f src/app/favicon.ico ]; then cp -f src/app/favicon.ico out/favicon.ico; fi
+
+      - name: Add .nojekyll for GitHub Pages
+        run: |
+          mkdir -p out
+          touch out/.nojekyll
+
       - name: Restore server routes (cleanup)
         if: always()
         run: |
