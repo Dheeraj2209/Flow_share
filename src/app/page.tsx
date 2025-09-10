@@ -5,7 +5,8 @@ import { motion, AnimatePresence, Reorder, useDragControls } from "framer-motion
 // @ts-expect-error - chrono-node has no ESM types here in this setup
 import * as chrono from 'chrono-node';
 import { Calendar, Check, ChevronLeft, ChevronRight, ListPlus, Plus, Share2, UserPlus, Users, Repeat, Clock, Trash2, Pencil, User, ChevronDown, Hash, Settings2, GripVertical, BookOpen } from "lucide-react";
-import MiniCalendar from '@/components/MiniCalendar';
+// Swap MiniCalendar to DayPicker-based variant
+import MiniCalendar from '@/components/MiniCalendarDayPicker';
 import { Person, Task, ExternalSource, View, UserPrefs } from '@/types';
 import { startOfWeek, startOfMonth, formatISODate, formatLocalISODate, formatLocalYearMonth, addDays, minutesToHHMM, hhmmToMinutes, nextWeekday, parseDueDate as parseDueDateUtil, isOverdueDate, formatTimeLocal, formatDateLocal } from '@/lib/date';
 
