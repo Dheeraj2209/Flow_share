@@ -14,6 +14,9 @@ const nextConfig: NextConfig = isStaticExport
       output: 'export',
       trailingSlash: true,
       images: { unoptimized: true },
+      // Support project-site deployments under a subpath
+      basePath: process.env.BASE_PATH || undefined,
+      assetPrefix: process.env.ASSET_PREFIX || undefined,
     }
   : {
       ...common,
