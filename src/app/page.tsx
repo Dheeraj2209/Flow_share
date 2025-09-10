@@ -339,6 +339,8 @@ export default function Home() {
   const [prefs, setPrefs] = useState<UserPrefs>({ relativeDates: true, timeFormat: '24h', dateFormat: 'YYYY-MM-DD' });
   const [calendarOpen, setCalendarOpen] = useState(true);
   const [peopleOpen, setPeopleOpen] = useState(true);
+  type SortMode = 'manual' | 'priority' | 'due';
+  const [sortMode, setSortMode] = useState<SortMode>('manual');
 
   useEffect(() => {
     try {
@@ -350,6 +352,8 @@ export default function Home() {
       if (co != null) setCalendarOpen(co === '1');
       const po = localStorage.getItem('peopleOpen');
       if (po != null) setPeopleOpen(po === '1');
+      const sm = localStorage.getItem('sortMode');
+      if (sm === 'manual' || sm === 'priority' || sm === 'due') setSortMode(sm);
     } catch {}
   }, []);
   useEffect(() => {
@@ -364,6 +368,9 @@ export default function Home() {
   useEffect(() => {
     try { localStorage.setItem('peopleOpen', peopleOpen ? '1' : '0'); } catch {}
   }, [peopleOpen]);
+  useEffect(() => {
+    try { localStorage.setItem('sortMode', sortMode); } catch {}
+  }, [sortMode]);
   useEffect(() => {
     try {
       const raw = localStorage.getItem('flow_prefs');
@@ -580,8 +587,19 @@ export default function Home() {
     // Sort tasks inside each day by 'sort' (if present), then status then title
     for (const [k, arr] of map) {
       arr.sort((a, b) => {
-        const sa = a.sort ?? 0, sb = b.sort ?? 0;
-        if (sa !== sb) return sa - sb;
+        // Sorting strategy
+        if (sortMode === 'priority') {
+          const pa = a.priority || 0, pb = b.priority || 0;
+          if (pb !== pa) return pb - pa; // high first
+        } else if (sortMode === 'due') {
+          const da = parseDueDate(a)?.getTime() ?? Number.POSITIVE_INFINITY;
+          const db = parseDueDate(b)?.getTime() ?? Number.POSITIVE_INFINITY;
+          if (da !== db) return da - db;
+        } else {
+          // manual uses 'sort' for day tasks only
+          const sa = a.sort ?? 0, sb = b.sort ?? 0;
+          if (sa !== sb) return sa - sb;
+        }
         const aStatus = (a.recurrence !== 'none' && (doneByDate.get(k)?.has(a.id))) ? 'done' : a.status;
         const bStatus = (b.recurrence !== 'none' && (doneByDate.get(k)?.has(b.id))) ? 'done' : b.status;
         if (aStatus !== bStatus) return aStatus > bStatus ? 1 : -1;
@@ -593,7 +611,7 @@ export default function Home() {
       end,
       days: Array.from(map.entries()).sort((a,b) => a[0].localeCompare(b[0]))
     };
-  }, [tasks, selectedPerson, view, anchor, refresh.current, doneByDate]);
+  }, [tasks, selectedPerson, view, anchor, refresh.current, doneByDate, sortMode]);
 
   const personColorMap = useMemo(() => {
     const m = new Map<number, string>();
@@ -682,28 +700,26 @@ export default function Home() {
     });
   }
 
-  async function onReorderDay(dateKey: string, reordered: Task[]) {
+  async function onReorderDay(dateKey: string, reorderedIds: number[]) {
     // Persist sort only for day-level tasks matching this dateKey
     // Compute minimal set of updates
     const updates: { id: number; sort: number }[] = [];
     let idx = 0;
-    for (const t of reordered) {
+    for (const id of reorderedIds) {
+      const t = tasks.find(x => x.id === id);
       if (!t) continue;
-      // Keep original order for non-day tasks
       if (t.bucket_type === 'day' && t.bucket_date === dateKey) {
         const current = t.sort ?? 0;
-        if (current !== idx) updates.push({ id: t.id, sort: idx });
-        t.sort = idx;
+        if (current !== idx) updates.push({ id, sort: idx });
         idx++;
       }
     }
     // Optimistic update: apply new ordering in state
     setTasks(prev => {
       const map = new Map(prev.map(p => [p.id, p] as const));
-      for (const t of reordered) {
-        if (!t) continue;
-        const cur = map.get(t.id);
-        map.set(t.id, { ...(cur || t), sort: t.sort });
+      for (const u of updates) {
+        const cur = map.get(u.id);
+        if (cur) map.set(u.id, { ...cur, sort: u.sort });
       }
       return Array.from(map.values());
     });
@@ -938,7 +954,13 @@ export default function Home() {
             <button onClick={() => changeAnchor(1)} className="px-3 py-1.5" title="Next"><ChevronRight size={16} /></button>
           </div>
           <div className="text-sm opacity-70 flex items-center gap-2"><Clock size={14} /> {anchorLabel}</div>
-          <div className="flex items-center gap-2 ml-auto min-w-[180px]">
+          <div className="inline-flex rounded-lg border overflow-hidden bg-white/60 dark:bg-black/30 backdrop-blur-sm ml-auto">
+            {(['manual','priority','due'] as SortMode[]).map(m => (
+              <button key={m} onClick={()=> setSortMode(m)} className={`px-3 py-1.5 capitalize transition-colors ${sortMode===m? 'bg-black text-white dark:bg-white dark:text-black':''}`}
+                title={m==='manual' ? 'Manual order' : (m==='priority' ? 'Sort by priority' : 'Sort by due date')}>{m}</button>
+            ))}
+          </div>
+          <div className="flex items-center gap-2 min-w-[180px]">
             <ProgressBar label={selectedPerson ? (people.find(p=>p.id===selectedPerson)?.name || 'Person') : 'All'}
               color={selectedPerson ? (activePersonColor || '#6b7280') : '#6b7280'}
               done={selectedPerson ? (progressByPerson.get(selectedPerson)?.done || 0) : progressAll.done}
@@ -1016,34 +1038,79 @@ export default function Home() {
             <AnimatePresence initial={false}>
               {grouped.days.map(([date, items]) => {
                 const safeItems = (items || []).filter(Boolean) as Task[];
+                const dayOnly = safeItems.filter(t => t.recurrence === 'none' && t.bucket_type === 'day' && t.bucket_date === date);
+                const otherItems = safeItems.filter(t => !dayOnly.includes(t));
+                const dayIds = dayOnly.map(t => t.id);
+                const reorderEnabled = sortMode === 'manual';
                 return (
                 <motion.section key={date} layout initial={{opacity:0, y:8}} animate={{opacity:1, y:0}} exit={{opacity:0, y:-8}}>
                   <h3 className="font-medium mb-3 flex items-center gap-2"><Calendar size={14} /> {date}</h3>
-                  <Reorder.Group as="div" axis="y" values={safeItems} onReorder={(reordered) => onReorderDay(date, reordered as Task[])}>
-                     <AnimatePresence initial={false}>
-                        {safeItems.map(task => (
-                          <ReorderableRow key={task.id} value={task}>
+                  {reorderEnabled ? (
+                    <Reorder.Group as="div" axis="y" values={dayIds} onReorder={(ids) => onReorderDay(date, ids as number[])}>
+                      <AnimatePresence initial={false}>
+                        {dayOnly.map(task => (
+                          <ReorderableRow key={task.id} valueId={task.id}>
                             {(start)=> (
-                        <TaskRow task={task} selected={selected.has(task.id)} accentColor={accentFor(task)} prefs={prefs}
-                          onSelect={(id,e)=>{
-                              setSelected(prev => {
-                                const next = new Set(prev);
-                                if (e.shiftKey || e.ctrlKey || e.metaKey) {
-                                  if (next.has(id)) next.delete(id); else next.add(id);
-                                } else { next.clear(); next.add(id); }
-                                return next;
-                              });
-                          }} onToggle={() => toggleDone(task, date)} onDelete={() => deleteTask(task)}
-                          personName={personById.get(task.person_id || -1)?.name}
-                          personColor={personById.get(task.person_id || -1)?.color || personColorMap.get(task.person_id || -1)}
-                          onReorderHandleDown={start}
-                          instanceDone={task.recurrence !== 'none' ? (doneByDate.get(date)?.has(task.id) || false) : (task.status==='done')}
-                        />
+                              <TaskRow task={task} selected={selected.has(task.id)} accentColor={accentFor(task)} prefs={prefs}
+                                onSelect={(id,e)=>{
+                                  setSelected(prev => {
+                                    const next = new Set(prev);
+                                    if (e.shiftKey || e.ctrlKey || e.metaKey) {
+                                      if (next.has(id)) next.delete(id); else next.add(id);
+                                    } else { next.clear(); next.add(id); }
+                                    return next;
+                                  });
+                                }} onToggle={() => toggleDone(task, date)} onDelete={() => deleteTask(task)}
+                                personName={personById.get(task.person_id || -1)?.name}
+                                personColor={personById.get(task.person_id || -1)?.color || personColorMap.get(task.person_id || -1)}
+                                onReorderHandleDown={start}
+                                instanceDone={task.recurrence !== 'none' ? (doneByDate.get(date)?.has(task.id) || false) : (task.status==='done')}
+                              />
                             )}
                           </ReorderableRow>
                         ))}
                       </AnimatePresence>
-                  </Reorder.Group>
+                    </Reorder.Group>
+                  ) : (
+                    <div className="flex flex-col gap-1">
+                      {dayOnly.map(task => (
+                        <TaskRow key={task.id} task={task} selected={selected.has(task.id)} accentColor={accentFor(task)} prefs={prefs}
+                          onSelect={(id,e)=>{
+                            setSelected(prev => {
+                              const next = new Set(prev);
+                              if (e.shiftKey || e.ctrlKey || e.metaKey) {
+                                if (next.has(id)) next.delete(id); else next.add(id);
+                              } else { next.clear(); next.add(id); }
+                              return next;
+                            });
+                          }} onToggle={() => toggleDone(task, date)} onDelete={() => deleteTask(task)}
+                          personName={personById.get(task.person_id || -1)?.name}
+                          personColor={personById.get(task.person_id || -1)?.color || personColorMap.get(task.person_id || -1)}
+                          instanceDone={task.recurrence !== 'none' ? (doneByDate.get(date)?.has(task.id) || false) : (task.status==='done')}
+                        />
+                      ))}
+                    </div>
+                  )}
+                  {otherItems.length > 0 && (
+                    <div className="flex flex-col gap-1 mt-2">
+                      {otherItems.map(task => (
+                        <TaskRow key={`o-${task.id}-${date}`} task={task} selected={selected.has(task.id)} accentColor={accentFor(task)} prefs={prefs}
+                          onSelect={(id,e)=>{
+                            setSelected(prev => {
+                              const next = new Set(prev);
+                              if (e.shiftKey || e.ctrlKey || e.metaKey) {
+                                if (next.has(id)) next.delete(id); else next.add(id);
+                              } else { next.clear(); next.add(id); }
+                              return next;
+                            });
+                          }} onToggle={() => toggleDone(task, date)} onDelete={() => deleteTask(task)}
+                          personName={personById.get(task.person_id || -1)?.name}
+                          personColor={personById.get(task.person_id || -1)?.color || personColorMap.get(task.person_id || -1)}
+                          instanceDone={task.recurrence !== 'none' ? (doneByDate.get(date)?.has(task.id) || false) : (task.status==='done')}
+                        />
+                      ))}
+                    </div>
+                  )}
                  </motion.section>
                );})}
             </AnimatePresence>
@@ -1100,10 +1167,12 @@ function TaskRow({ task, onToggle, onDelete, selected=false, onSelect, accentCol
       style={{boxShadow: `inset 0 0 0 2px ${accentAlpha}`}}
       onMouseDown={(e)=> onSelect?.(task.id, e)}
     >
-      <span className="cursor-grab active:cursor-grabbing opacity-60 hover:opacity-100" title="Reorder"
-        onPointerDown={(e)=>{ e.stopPropagation(); onReorderHandleDown?.(e); }}>
-        <GripVertical size={14} />
-      </span>
+      {onReorderHandleDown && (
+        <span className="cursor-grab active:cursor-grabbing opacity-60 hover:opacity-100" title="Reorder"
+          onPointerDown={(e)=>{ e.stopPropagation(); onReorderHandleDown?.(e); }}>
+          <GripVertical size={14} />
+        </span>
+      )}
       <button onClick={onToggle} className={`size-5 rounded grid place-items-center border transition-colors ${isDone ? 'bg-emerald-500 text-white border-emerald-600' : 'hover:bg-black/5 dark:hover:bg-white/10'}`} title="Toggle done">
         {isDone ? <Check size={14}/> : null}
       </button>
@@ -1271,10 +1340,11 @@ function CalendarGrid({ view, anchor, grouped, onDropTask, onReorderDay, isSelec
                 <span>{d.getUTCDate()}</span>
                 {isToday && <span className="size-1.5 rounded-full bg-emerald-500"></span>}
               </div>
-              <Reorder.Group as="div" axis="y" values={dayItems} onReorder={(reordered) => onReorderDay(key, reordered as Task[])}>
+              {sortMode==='manual' ? (
+              <Reorder.Group as="div" axis="y" values={dayItems.map(t=>t.id)} onReorder={(ids) => onReorderDay(key, ids as number[])}>
                 <div className="flex flex-col gap-1">
                   {dayItems.map(t => (
-                    <ReorderableChip key={t.id} task={t} value={t}>
+                    <ReorderableChip key={t.id} task={t} valueId={t.id}>
                       {(start)=> (
                         <TaskChip task={t} accentColor={accentFor(t)} selected={isSelected(t.id)} onSelect={onSelect} onReorderHandleDown={start}
                           personName={(t.person_id!=null? personById.get(t.person_id||-1)?.name: undefined)}
@@ -1293,6 +1363,24 @@ function CalendarGrid({ view, anchor, grouped, onDropTask, onReorderDay, isSelec
                   ))}
                 </div>
               </Reorder.Group>
+              ) : (
+                <div className="flex flex-col gap-1">
+                  {dayItems.map(t => (
+                    <TaskChip key={t.id} task={t} accentColor={accentFor(t)} selected={isSelected(t.id)} onSelect={onSelect}
+                      personName={(t.person_id!=null? personById.get(t.person_id||-1)?.name: undefined)}
+                      personColor={(t.person_id!=null? (t.person_id!=null? (personById.get(t.person_id||-1)?.color || personColorMap.get(t.person_id||-1)) : undefined) : undefined)}
+                      prefs={prefs}
+                    />
+                  ))}
+                  {recurring.map(t => (
+                    <TaskChip key={`r-${t.id}`} task={t} accentColor={accentFor(t)} selected={isSelected(t.id)} onSelect={onSelect}
+                      personName={(t.person_id!=null? personById.get(t.person_id||-1)?.name: undefined)}
+                      personColor={(t.person_id!=null? (personById.get(t.person_id||-1)?.color || personColorMap.get(t.person_id||-1)) : undefined)}
+                      prefs={prefs}
+                    />
+                  ))}
+                </div>
+              )}
             </div>
           );
         })}
@@ -1352,16 +1440,16 @@ function TaskChip({ task, onToggle, selected=false, onSelect, accentColor, onReo
   );
 }
 
-function ReorderableChip({ task, children, value }: { task: Task; children: (start:(e:any)=>void)=>React.ReactNode; value: Task }) {
+function ReorderableChip({ task, children, valueId }: { task: Task; children: (start:(e:any)=>void)=>React.ReactNode; valueId: number }) {
   const controls = useDragControls();
   return (
-    <Reorder.Item as="div" value={value} dragListener={false} dragControls={controls}>
+    <Reorder.Item as="div" value={valueId} dragListener={false} dragControls={controls}>
       {children((e:any)=> controls.start(e))}
     </Reorder.Item>
   );
 }
 
-function ReorderableRow({ value, children }: { value: Task; children: (start:(e:any)=>void)=>React.ReactNode; }) {
+function ReorderableRow({ valueId, children }: { valueId: number; children: (start:(e:any)=>void)=>React.ReactNode; }) {
   const controls = useDragControls();
   // On touch devices, require a longer press before starting drag to avoid scroll conflicts.
   const startWithDelay = (downEvent: any) => {
@@ -1374,7 +1462,7 @@ function ReorderableRow({ value, children }: { value: Task; children: (start:(e:
     window.addEventListener('pointercancel', clear, { capture: true } as any);
   };
   return (
-    <Reorder.Item as="div" value={value} dragListener={false} dragControls={controls}>
+    <Reorder.Item as="div" value={valueId} dragListener={false} dragControls={controls}>
       {children(startWithDelay)}
     </Reorder.Item>
   );
