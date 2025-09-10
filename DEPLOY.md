@@ -17,10 +17,17 @@ GitHub Pages
 Backend Hosting (Render/Railway/Other)
 - Build command: `npm ci && npm run build`
 - Start command: `npm start`
-- Env vars: set `CORS_ORIGIN=https://Dheeraj2209.github.io` and optionally `DATA_DIR=/var/data`.
-- Persistent storage: mount a disk/volume to the directory used by `DATA_DIR`.
+- Env vars:
+  - `CORS_ORIGIN=https://Dheeraj2209.github.io`
+  - For free persistence (recommended): set `LIBSQL_URL` and `LIBSQL_AUTH_TOKEN` (Turso/libSQL). No disk required.
+  - Or ephemeral local: `DATA_DIR=/tmp/flowshare-data` (data resets on restarts)
+- Persistent storage via disk (paid on Render): mount a disk at `/var/data` and set `DATA_DIR=/var/data`.
+
+API-only backend UI
+- Set `NEXT_PUBLIC_API_ONLY=1` on the backend service to disable the full UI and show a simple message at `/` pointing to your GitHub Pages site.
+- Health check is available at `/api/health`.
 
 Notes
 - The app uses Server-Sent Events at `/api/stream`; ensure the backend allows long-running connections and sets `Access-Control-Allow-Origin`.
 - This repo is configured for static export (`next.config.ts` sets `output: 'export'`). API routes are served only by the backend host.
-
+- When `LIBSQL_URL` is provided, the backend uses a remote SQLite database (libSQL/Turso) and persists data across restarts.

@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(_: NextRequest, { params }: { params: { id: string } }) {
   const db = getDb();
-  const task = db.prepare(`SELECT * FROM tasks WHERE id = ?`).get(Number(params.id));
+  const task = await db.get(`SELECT * FROM tasks WHERE id = ?`, [Number(params.id)]);
   if (!task) return new Response('Not found', { status: 404, headers: corsHeaders() });
   return Response.json({ task }, { headers: corsHeaders() });
 }
@@ -16,7 +16,7 @@ export async function GET(_: NextRequest, { params }: { params: { id: string } }
 export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
   const db = getDb();
   const id = Number(params.id);
-  const existing = db.prepare(`SELECT * FROM tasks WHERE id = ?`).get(id);
+  const existing = await db.get(`SELECT * FROM tasks WHERE id = ?`, [id]);
   if (!existing) return new Response('Not found', { status: 404, headers: corsHeaders() });
   const body = await req.json().catch(() => ({} as any));
 
@@ -24,10 +24,9 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
     const done_on = String(body.done_on);
     const done = body.done === false ? false : true;
     if (done) {
-      db.prepare(`INSERT OR IGNORE INTO task_done_dates (task_id, date) VALUES (?, ?)`)
-        .run(id, done_on);
+      await db.run(`INSERT OR IGNORE INTO task_done_dates (task_id, date) VALUES (?, ?)`, [id, done_on]);
     } else {
-      db.prepare(`DELETE FROM task_done_dates WHERE task_id = ? AND date = ?`).run(id, done_on);
+      await db.run(`DELETE FROM task_done_dates WHERE task_id = ? AND date = ?`, [id, done_on]);
     }
     broadcast('task_updated', { task_id: id, done_on, done });
     return Response.json({ ok: true, task_id: id, done_on, done }, { headers: corsHeaders() });
@@ -55,8 +54,8 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   if (!fields.length) return new Response('No changes', { status: 400 });
   const sql = `UPDATE tasks SET ${fields.join(', ')} WHERE id = ?`;
   values.push(id);
-  db.prepare(sql).run(...values);
-  const task = db.prepare(`SELECT * FROM tasks WHERE id = ?`).get(id);
+  await db.run(sql, values);
+  const task = await db.get(`SELECT * FROM tasks WHERE id = ?`, [id]);
   broadcast('task_updated', { task });
   return Response.json({ task }, { headers: corsHeaders() });
 }
@@ -64,9 +63,9 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 export async function DELETE(_: NextRequest, { params }: { params: { id: string } }) {
   const db = getDb();
   const id = Number(params.id);
-  const task = db.prepare(`SELECT * FROM tasks WHERE id = ?`).get(id);
+  const task = await db.get(`SELECT * FROM tasks WHERE id = ?`, [id]);
   if (!task) return new Response('Not found', { status: 404, headers: corsHeaders() });
-  db.prepare(`DELETE FROM tasks WHERE id = ?`).run(id);
+  await db.run(`DELETE FROM tasks WHERE id = ?`, [id]);
   broadcast('task_deleted', { id });
   return new Response(null, { status: 204, headers: corsHeaders() });
 }

@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(_: NextRequest, { params }: { params: { id: string } }) {
   const db = getDb();
-  const person = db.prepare(`SELECT * FROM people WHERE id = ?`).get(Number(params.id));
+  const person = await db.get(`SELECT * FROM people WHERE id = ?`, [Number(params.id)]);
   if (!person) return new Response('Not found', { status: 404, headers: corsHeaders() });
   return Response.json({ person }, { headers: corsHeaders() });
 }
@@ -20,13 +20,13 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   const email = body.email !== undefined ? (body.email ? String(body.email).trim() : null) : undefined;
   const color = body.color !== undefined ? (body.color ? String(body.color) : null) : undefined;
   const id = Number(params.id);
-  const existing = db.prepare(`SELECT * FROM people WHERE id = ?`).get(id);
+  const existing = await db.get(`SELECT * FROM people WHERE id = ?`, [id]);
   if (!existing) return new Response('Not found', { status: 404, headers: corsHeaders() });
   const newName = name !== undefined ? name : existing.name;
   const newEmail = email !== undefined ? email : existing.email;
   const newColor = color !== undefined ? color : existing.color;
-  db.prepare(`UPDATE people SET name = ?, email = ?, color = ? WHERE id = ?`).run(newName, newEmail, newColor, id);
-  const person = db.prepare(`SELECT * FROM people WHERE id = ?`).get(id);
+  await db.run(`UPDATE people SET name = ?, email = ?, color = ? WHERE id = ?`, [newName, newEmail, newColor, id]);
+  const person = await db.get(`SELECT * FROM people WHERE id = ?`, [id]);
   broadcast('people_updated', { type: 'updated', person });
   return Response.json({ person }, { headers: corsHeaders() });
 }
@@ -34,11 +34,11 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
 export async function DELETE(_: NextRequest, { params }: { params: { id: string } }) {
   const db = getDb();
   const id = Number(params.id);
-  const person = db.prepare(`SELECT * FROM people WHERE id = ?`).get(id);
+  const person = await db.get(`SELECT * FROM people WHERE id = ?`, [id]);
   if (!person) return new Response('Not found', { status: 404, headers: corsHeaders() });
   // On delete, set tasks.person_id = NULL
-  db.prepare(`UPDATE tasks SET person_id = NULL WHERE person_id = ?`).run(id);
-  db.prepare(`DELETE FROM people WHERE id = ?`).run(id);
+  await db.run(`UPDATE tasks SET person_id = NULL WHERE person_id = ?`, [id]);
+  await db.run(`DELETE FROM people WHERE id = ?`, [id]);
   broadcast('people_updated', { type: 'deleted', id });
   return new Response(null, { status: 204, headers: corsHeaders() });
 }

@@ -36,10 +36,7 @@ export async function GET(req: NextRequest) {
   const expires_at = Math.floor(Date.now() / 1000) + expires_in - 60;
 
   const db = getDb();
-  const insert = db.prepare(`INSERT INTO external_sources (person_id, provider, access_token, refresh_token, expires_at, scope, account)
-    VALUES (?, ?, ?, ?, ?, ?, ?)`);
-  // Minimal: we don't know account email here; could fetch /me
-  insert.run(personId, provider, access_token, refresh_token || null, expires_at, tok.scope || null, null);
+  await db.run(`INSERT INTO external_sources (person_id, provider, access_token, refresh_token, expires_at, scope, account)
+    VALUES (?, ?, ?, ?, ?, ?, ?)`, [personId, provider, access_token, refresh_token || null, expires_at, tok.scope || null, null]);
   return new Response('<script>window.close && window.close();</script> Connected. You can close this window.', { headers: { 'Content-Type': 'text/html' } });
 }
-

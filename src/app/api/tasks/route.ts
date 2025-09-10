@@ -14,8 +14,8 @@ export async function GET(req: NextRequest) {
   const params: any[] = [];
   if (personId) { where.push('person_id = ?'); params.push(Number(personId)); }
   const sql = `SELECT * FROM tasks ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY created_at DESC`;
-  const tasks = db.prepare(sql).all(...params);
-  const doneDates = db.prepare(`SELECT task_id, date FROM task_done_dates`).all();
+  const tasks = await db.query(sql, params);
+  const doneDates = await db.query(`SELECT task_id, date FROM task_done_dates`);
   return Response.json({ tasks, doneDates }, { headers: corsHeaders() });
 }
 
@@ -40,16 +40,16 @@ export async function POST(req: NextRequest) {
   // sort ordering for day buckets
   let sort = 0;
   if (bucket_type === 'day' && bucket_date) {
-    const row = db.prepare(`SELECT COALESCE(MAX(sort), -1) + 1 AS next FROM tasks WHERE bucket_type='day' AND bucket_date=?`).get(bucket_date) as any;
+    const row = await db.get(`SELECT COALESCE(MAX(sort), -1) + 1 AS next FROM tasks WHERE bucket_type='day' AND bucket_date=?`, [bucket_date]) as any;
     sort = row?.next ?? 0;
   }
 
-  const stmt = db.prepare(`
-    INSERT INTO tasks (title, description, person_id, status, due_date, due_time, bucket_type, bucket_date, recurrence, interval, byweekday, until, sort, color, priority)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-  `);
-  const info = stmt.run(title, description, person_id, status, due_date, due_time, bucket_type, bucket_date, recurrence, interval, byweekday, until, sort, color, priority);
-  const task = db.prepare(`SELECT * FROM tasks WHERE id = ?`).get(info.lastInsertRowid as number);
+  const info = await db.run(
+    `INSERT INTO tasks (title, description, person_id, status, due_date, due_time, bucket_type, bucket_date, recurrence, interval, byweekday, until, sort, color, priority)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    [title, description, person_id, status, due_date, due_time, bucket_type, bucket_date, recurrence, interval, byweekday, until, sort, color, priority]
+  );
+  const task = await db.get(`SELECT * FROM tasks WHERE id = ?`, [info.lastInsertRowid as number]);
   broadcast('task_created', { task });
   return Response.json({ task }, { status: 201, headers: corsHeaders() });
 }

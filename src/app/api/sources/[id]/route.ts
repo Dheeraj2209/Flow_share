@@ -7,7 +7,7 @@ export const dynamic = 'force-dynamic';
 
 export async function GET(_: NextRequest, { params }: { params: { id: string } }) {
   const db = getDb();
-  const src = db.prepare(`SELECT * FROM external_sources WHERE id = ?`).get(Number(params.id));
+  const src = await db.get(`SELECT * FROM external_sources WHERE id = ?`, [Number(params.id)]);
   if (!src) return new Response('Not found', { status: 404, headers: corsHeaders() });
   return Response.json({ source: src }, { headers: corsHeaders() });
 }
@@ -24,15 +24,15 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   if (provider !== undefined) { fields.push('provider = ?'); vals.push(provider); }
   if (!fields.length) return new Response('No changes', { status: 400 });
   vals.push(id);
-  db.prepare(`UPDATE external_sources SET ${fields.join(', ')} WHERE id = ?`).run(...vals);
-  const src = db.prepare(`SELECT * FROM external_sources WHERE id = ?`).get(id);
+  await db.run(`UPDATE external_sources SET ${fields.join(', ')} WHERE id = ?`, vals);
+  const src = await db.get(`SELECT * FROM external_sources WHERE id = ?`, [id]);
   return Response.json({ source: src }, { headers: corsHeaders() });
 }
 
 export async function DELETE(_: NextRequest, { params }: { params: { id: string } }) {
   const db = getDb();
   const id = Number(params.id);
-  db.prepare(`DELETE FROM external_sources WHERE id = ?`).run(id);
+  await db.run(`DELETE FROM external_sources WHERE id = ?`, [id]);
   return new Response(null, { status: 204, headers: corsHeaders() });
 }
 

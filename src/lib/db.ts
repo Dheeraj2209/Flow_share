@@ -1,11 +1,49 @@
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
+import { createClient, Client as LibsqlClient } from '@libsql/client';
 
-let db: Database.Database | null = null;
+export type Row = Record<string, unknown>;
+export type RunResult = { lastInsertRowid: number | null; rowsAffected: number };
+export type DB = {
+  query: (sql: string, params?: any[]) => Promise<Row[]>;
+  get: (sql: string, params?: any[]) => Promise<Row | undefined>;
+  run: (sql: string, params?: any[]) => Promise<RunResult>;
+};
 
-export function getDb() {
+let db: DB | null = null;
+
+export function getDb(): DB {
   if (db) return db;
+  const url = process.env.LIBSQL_URL;
+  if (url) {
+    const client: LibsqlClient = createClient({ url, authToken: process.env.LIBSQL_AUTH_TOKEN });
+    db = {
+      async query(sql, params = []) {
+        const res = await client.execute({ sql, args: params });
+        if (!('columns' in res)) return [];
+        const cols = res.columns.map((c: any) => (typeof c === 'string' ? c : (c?.name || '')));
+        return res.rows.map((r: any) => Object.fromEntries(cols.map((c: string, i: number) => [c, r[i] as unknown])));
+      },
+      async get(sql, params = []) {
+        const res = await client.execute({ sql, args: params });
+        if (!('columns' in res) || res.rows.length === 0) return undefined;
+        const cols = res.columns.map((c: any) => (typeof c === 'string' ? c : (c?.name || '')));
+        const row = res.rows[0];
+        return Object.fromEntries(cols.map((c: string, i: number) => [c, row[i] as unknown]));
+      },
+      async run(sql, params = []) {
+        const res = await client.execute({ sql, args: params });
+        const lid = (res as any).lastInsertRowid != null ? Number((res as any).lastInsertRowid) : null;
+        const ra = (res as any).rowsAffected != null ? Number((res as any).rowsAffected) : 0;
+        return { lastInsertRowid: lid, rowsAffected: ra };
+      },
+    };
+    void migrate(db).catch(() => {});
+    return db;
+  }
+
+  // Local SQLite fallback (ephemeral on cloud hosts)
   const cfg = process.env.DATA_DIR;
   let dataDir = cfg
     ? (path.isAbsolute(cfg) ? cfg : path.join(process.cwd(), cfg))
@@ -23,15 +61,26 @@ export function getDb() {
     }
   }
   const file = path.join(dataDir, 'app.db');
-  db = new Database(file);
-  db.pragma('journal_mode = WAL');
-  migrate(db);
+  const native = new Database(file);
+  native.pragma('journal_mode = WAL');
+  db = {
+    async query(sql, params = []) {
+      return native.prepare(sql).all(...params) as Row[];
+    },
+    async get(sql, params = []) {
+      return native.prepare(sql).get(...params) as Row | undefined;
+    },
+    async run(sql, params = []) {
+      const info = native.prepare(sql).run(...params);
+      return { lastInsertRowid: info.lastInsertRowid ? Number(info.lastInsertRowid) : null, rowsAffected: Number((info as any).changes || 0) };
+    },
+  };
+  void migrate(db).catch(() => {});
   return db;
 }
 
-function migrate(db: Database.Database) {
-  // people table
-  db.prepare(`
+async function migrate(db: DB) {
+  await db.run(`
     CREATE TABLE IF NOT EXISTS people (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       name TEXT NOT NULL,
@@ -39,10 +88,9 @@ function migrate(db: Database.Database) {
       color TEXT,
       created_at TEXT NOT NULL DEFAULT (datetime('now'))
     )
-  `).run();
+  `);
 
-  // tasks table
-  db.prepare(`
+  await db.run(`
     CREATE TABLE IF NOT EXISTS tasks (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       title TEXT NOT NULL,
@@ -51,12 +99,12 @@ function migrate(db: Database.Database) {
       status TEXT NOT NULL DEFAULT 'todo',
       due_date TEXT,
       due_time TEXT,
-      bucket_type TEXT, -- 'day' | 'week' | 'month'
-      bucket_date TEXT, -- anchor date (YYYY-MM-DD)
-      recurrence TEXT NOT NULL DEFAULT 'none', -- 'none' | 'daily' | 'weekly' | 'monthly'
+      bucket_type TEXT,
+      bucket_date TEXT,
+      recurrence TEXT NOT NULL DEFAULT 'none',
       interval INTEGER NOT NULL DEFAULT 1,
-      byweekday TEXT, -- JSON array of numbers 0-6 for weekly
-      until TEXT, -- ISO date string
+      byweekday TEXT,
+      until TEXT,
       sort INTEGER NOT NULL DEFAULT 0,
       color TEXT,
       priority INTEGER NOT NULL DEFAULT 0,
@@ -64,20 +112,18 @@ function migrate(db: Database.Database) {
       updated_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE SET NULL
     )
-  `).run();
+  `);
 
-  // trigger to update updated_at
-  db.prepare(`
+  await db.run(`
     CREATE TRIGGER IF NOT EXISTS tasks_updated_at
     AFTER UPDATE ON tasks
     FOR EACH ROW
     BEGIN
       UPDATE tasks SET updated_at = datetime('now') WHERE id = OLD.id;
     END;
-  `).run();
+  `);
 
-  // external sources table (connectors)
-  db.prepare(`
+  await db.run(`
     CREATE TABLE IF NOT EXISTS external_sources (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
       person_id INTEGER NOT NULL,
@@ -91,60 +137,42 @@ function migrate(db: Database.Database) {
       created_at TEXT NOT NULL DEFAULT (datetime('now')),
       FOREIGN KEY (person_id) REFERENCES people(id) ON DELETE CASCADE
     )
-  `).run();
+  `);
 
-  // per-instance completion for recurring tasks
-  db.prepare(`
+  await db.run(`
     CREATE TABLE IF NOT EXISTS task_done_dates (
       task_id INTEGER NOT NULL,
       date TEXT NOT NULL,
       PRIMARY KEY (task_id, date),
       FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
     )
-  `).run();
+  `);
 
-  // Backfill migrations for older DBs
   try {
-    const cols = db.prepare(`PRAGMA table_info(tasks)`).all() as { name: string }[];
-    const names = new Set(cols.map(c => c.name));
-    if (!names.has('due_time')) {
-      db.prepare(`ALTER TABLE tasks ADD COLUMN due_time TEXT`).run();
-    }
-    if (!names.has('sort')) {
-      db.prepare(`ALTER TABLE tasks ADD COLUMN sort INTEGER NOT NULL DEFAULT 0`).run();
-    }
-    if (!names.has('color')) {
-      db.prepare(`ALTER TABLE tasks ADD COLUMN color TEXT`).run();
-    }
-    if (!names.has('priority')) {
-      db.prepare(`ALTER TABLE tasks ADD COLUMN priority INTEGER NOT NULL DEFAULT 0`).run();
-    }
-    if (!names.has('external_id')) {
-      db.prepare(`ALTER TABLE tasks ADD COLUMN external_id TEXT`).run();
-    }
-    if (!names.has('source_id')) {
-      db.prepare(`ALTER TABLE tasks ADD COLUMN source_id INTEGER`).run();
-    }
+    const cols = await db.query(`PRAGMA table_info(tasks)`);
+    const names = new Set(cols.map(c => String(c.name)));
+    if (!names.has('due_time')) await db.run(`ALTER TABLE tasks ADD COLUMN due_time TEXT`);
+    if (!names.has('sort')) await db.run(`ALTER TABLE tasks ADD COLUMN sort INTEGER NOT NULL DEFAULT 0`);
+    if (!names.has('color')) await db.run(`ALTER TABLE tasks ADD COLUMN color TEXT`);
+    if (!names.has('priority')) await db.run(`ALTER TABLE tasks ADD COLUMN priority INTEGER NOT NULL DEFAULT 0`);
+    if (!names.has('external_id')) await db.run(`ALTER TABLE tasks ADD COLUMN external_id TEXT`);
+    if (!names.has('source_id')) await db.run(`ALTER TABLE tasks ADD COLUMN source_id INTEGER`);
   } catch {}
 
-  // Backfill external_sources oauth columns
   try {
-    const scols = db.prepare(`PRAGMA table_info(external_sources)`).all() as { name: string }[];
-    const snames = new Set(scols.map(c => c.name));
-    if (!snames.has('access_token')) db.prepare(`ALTER TABLE external_sources ADD COLUMN access_token TEXT`).run();
-    if (!snames.has('refresh_token')) db.prepare(`ALTER TABLE external_sources ADD COLUMN refresh_token TEXT`).run();
-    if (!snames.has('expires_at')) db.prepare(`ALTER TABLE external_sources ADD COLUMN expires_at INTEGER`).run();
-    if (!snames.has('scope')) db.prepare(`ALTER TABLE external_sources ADD COLUMN scope TEXT`).run();
-    if (!snames.has('account')) db.prepare(`ALTER TABLE external_sources ADD COLUMN account TEXT`).run();
+    const scols = await db.query(`PRAGMA table_info(external_sources)`);
+    const snames = new Set(scols.map(c => String(c.name)));
+    if (!snames.has('access_token')) await db.run(`ALTER TABLE external_sources ADD COLUMN access_token TEXT`);
+    if (!snames.has('refresh_token')) await db.run(`ALTER TABLE external_sources ADD COLUMN refresh_token TEXT`);
+    if (!snames.has('expires_at')) await db.run(`ALTER TABLE external_sources ADD COLUMN expires_at INTEGER`);
+    if (!snames.has('scope')) await db.run(`ALTER TABLE external_sources ADD COLUMN scope TEXT`);
+    if (!snames.has('account')) await db.run(`ALTER TABLE external_sources ADD COLUMN account TEXT`);
   } catch {}
 
-  // Backfill people.color
   try {
-    const pcols = db.prepare(`PRAGMA table_info(people)`).all() as { name: string }[];
-    const pnames = new Set(pcols.map(c => c.name));
-    if (!pnames.has('color')) {
-      db.prepare(`ALTER TABLE people ADD COLUMN color TEXT`).run();
-    }
+    const pcols = await db.query(`PRAGMA table_info(people)`);
+    const pnames = new Set(pcols.map(c => String(c.name)));
+    if (!pnames.has('color')) await db.run(`ALTER TABLE people ADD COLUMN color TEXT`);
   } catch {}
 }
 
@@ -162,17 +190,17 @@ export type Task = {
   description?: string | null;
   person_id?: number | null;
   status: 'todo' | 'in_progress' | 'done';
-  due_date?: string | null; // ISO date
-  due_time?: string | null; // HH:mm
+  due_date?: string | null;
+  due_time?: string | null;
   bucket_type?: 'day' | 'week' | 'month' | null;
-  bucket_date?: string | null; // ISO date
+  bucket_date?: string | null;
   recurrence: 'none' | 'daily' | 'weekly' | 'monthly';
   interval: number;
-  byweekday?: string | null; // JSON
+  byweekday?: string | null;
   until?: string | null;
   sort?: number;
   color?: string | null;
-  priority?: number; // 0..3
+  priority?: number;
   external_id?: string | null;
   source_id?: number | null;
   created_at: string;
@@ -186,3 +214,4 @@ export type ExternalSource = {
   url?: string | null;
   created_at: string;
 };
+

@@ -8,7 +8,7 @@ export const dynamic = 'force-dynamic';
 
 export async function GET() {
   const db = getDb();
-  const people = db.prepare(`SELECT * FROM people ORDER BY name COLLATE NOCASE`).all();
+  const people = await db.query(`SELECT * FROM people ORDER BY name COLLATE NOCASE`);
   return Response.json({ people }, { headers: corsHeaders() });
 }
 
@@ -23,9 +23,8 @@ export async function POST(req: NextRequest) {
     const palette = ['#ef4444','#f97316','#eab308','#22c55e','#06b6d4','#3b82f6','#8b5cf6','#ec4899'];
     color = palette[Math.floor(Math.random() * palette.length)];
   }
-  const stmt = db.prepare(`INSERT INTO people (name, email, color) VALUES (?, ?, ?)`);
-  const info = stmt.run(name, email, color);
-  const person = db.prepare(`SELECT * FROM people WHERE id = ?`).get(info.lastInsertRowid as number);
+  const info = await db.run(`INSERT INTO people (name, email, color) VALUES (?, ?, ?)`, [name, email, color]);
+  const person = await db.get(`SELECT * FROM people WHERE id = ?`, [info.lastInsertRowid as number]);
   broadcast('people_updated', { type: 'created', person });
   return Response.json({ person }, { status: 201, headers: corsHeaders() });
 }

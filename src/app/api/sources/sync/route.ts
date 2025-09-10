@@ -43,16 +43,14 @@ async function importICS(url: string, person_id: number, source_id: number) {
     const external_id = String(ev.uid || k);
     tasks.push({ title, due_date, due_time, external_id });
   }
-  const insert = db.prepare(`INSERT INTO tasks (title, person_id, status, due_date, due_time, bucket_type, bucket_date, recurrence, interval, sort, source_id, external_id)
-    VALUES (?, ?, 'todo', ?, ?, 'day', ?, 'none', 1, 0, ?, ?)`);
-  const select = db.prepare(`SELECT id FROM tasks WHERE source_id = ? AND external_id = ?`);
-  const update = db.prepare(`UPDATE tasks SET title=?, due_date=?, due_time=?, bucket_type='day', bucket_date=? WHERE id = ?`);
+  const insertSQL = `INSERT INTO tasks (title, person_id, status, due_date, due_time, bucket_type, bucket_date, recurrence, interval, sort, source_id, external_id)
+    VALUES (?, ?, 'todo', ?, ?, 'day', ?, 'none', 1, 0, ?, ?)`;
   for (const t of tasks) {
-    const existing = select.get(source_id, t.external_id) as RowId | undefined;
+    const existing = await db.get(`SELECT id FROM tasks WHERE source_id = ? AND external_id = ?`, [source_id, t.external_id]) as RowId | undefined;
     if (existing?.id) {
-      update.run(t.title, t.due_date, t.due_time, t.due_date, existing.id);
+      await db.run(`UPDATE tasks SET title=?, due_date=?, due_time=?, bucket_type='day', bucket_date=? WHERE id = ?`, [t.title, t.due_date, t.due_time, t.due_date, existing.id]);
     } else {
-      insert.run(t.title, person_id, t.due_date, t.due_time, t.due_date, source_id, t.external_id);
+      await db.run(insertSQL, [t.title, person_id, t.due_date, t.due_time, t.due_date, source_id, t.external_id]);
     }
   }
   return { imported: tasks.length };
@@ -65,7 +63,7 @@ export async function POST(req: NextRequest) {
   const source_idRaw = (bodyUnknown as { source_id?: unknown }).source_id;
   const source_id = source_idRaw != null ? Number(source_idRaw) : null;
   if (!source_id) return new Response('source_id required', { status: 400 });
-  const src = db.prepare(`SELECT * FROM external_sources WHERE id = ?`).get(source_id) as DbExternalSource | undefined;
+  const src = await db.get(`SELECT * FROM external_sources WHERE id = ?`, [source_id]) as DbExternalSource | undefined;
   if (!src) return new Response('Source not found', { status: 404 });
   let result: { imported: number } = { imported: 0 };
   if (src.provider === 'ms_graph_todo' || src.provider === 'ms_graph_calendar') {
@@ -85,13 +83,12 @@ export async function POST(req: NextRequest) {
               const due_time = d ? `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}` : null;
               const external_id = it.id;
               if (!due_date) continue;
-              const selectRow = db.prepare(`SELECT id FROM tasks WHERE source_id=? AND external_id=?`).get(src.id, external_id) as RowId | undefined;
+              const selectRow = await db.get(`SELECT id FROM tasks WHERE source_id=? AND external_id=?`, [src.id, external_id]) as RowId | undefined;
               if (selectRow?.id) {
-                db.prepare(`UPDATE tasks SET title=?, due_date=?, due_time=?, bucket_type='day', bucket_date=? WHERE id=?`).run(title, due_date, due_time, due_date, selectRow.id);
+                await db.run(`UPDATE tasks SET title=?, due_date=?, due_time=?, bucket_type='day', bucket_date=? WHERE id=?`, [title, due_date, due_time, due_date, selectRow.id]);
               } else {
-                db.prepare(`INSERT INTO tasks (title, person_id, status, due_date, due_time, bucket_type, bucket_date, recurrence, interval, sort, source_id, external_id)
-                  VALUES (?, ?, 'todo', ?, ?, 'day', ?, 'none', 1, 0, ?, ?)`)
-                  .run(title, src.person_id, due_date, due_time, due_date, src.id, external_id);
+                await db.run(`INSERT INTO tasks (title, person_id, status, due_date, due_time, bucket_type, bucket_date, recurrence, interval, sort, source_id, external_id)
+                  VALUES (?, ?, 'todo', ?, ?, 'day', ?, 'none', 1, 0, ?, ?)`, [title, src.person_id, due_date, due_time, due_date, src.id, external_id]);
               }
               result.imported++;
             }
@@ -112,13 +109,12 @@ export async function POST(req: NextRequest) {
           const due_date = d.toISOString().slice(0,10);
           const due_time = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
           const external_id = ev.id;
-          const selectRow = db.prepare(`SELECT id FROM tasks WHERE source_id=? AND external_id=?`).get(src.id, external_id) as RowId | undefined;
+          const selectRow = await db.get(`SELECT id FROM tasks WHERE source_id=? AND external_id=?`, [src.id, external_id]) as RowId | undefined;
           if (selectRow?.id) {
-            db.prepare(`UPDATE tasks SET title=?, due_date=?, due_time=?, bucket_type='day', bucket_date=? WHERE id=?`).run(title, due_date, due_time, due_date, selectRow.id);
+            await db.run(`UPDATE tasks SET title=?, due_date=?, due_time=?, bucket_type='day', bucket_date=? WHERE id=?`, [title, due_date, due_time, due_date, selectRow.id]);
           } else {
-            db.prepare(`INSERT INTO tasks (title, person_id, status, due_date, due_time, bucket_type, bucket_date, recurrence, interval, sort, source_id, external_id)
-              VALUES (?, ?, 'todo', ?, ?, 'day', ?, 'none', 1, 0, ?, ?)`)
-              .run(title, src.person_id, due_date, due_time, due_date, src.id, external_id);
+            await db.run(`INSERT INTO tasks (title, person_id, status, due_date, due_time, bucket_type, bucket_date, recurrence, interval, sort, source_id, external_id)
+              VALUES (?, ?, 'todo', ?, ?, 'day', ?, 'none', 1, 0, ?, ?)`, [title, src.person_id, due_date, due_time, due_date, src.id, external_id]);
           }
           result.imported++;
         }

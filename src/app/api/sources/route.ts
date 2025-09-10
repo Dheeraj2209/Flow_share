@@ -10,8 +10,8 @@ export async function GET(req: NextRequest) {
   const { searchParams } = new URL(req.url);
   const personId = searchParams.get('personId');
   const rows = personId
-    ? db.prepare(`SELECT * FROM external_sources WHERE person_id = ? ORDER BY created_at DESC`).all(Number(personId))
-    : db.prepare(`SELECT * FROM external_sources ORDER BY created_at DESC`).all();
+    ? await db.query(`SELECT * FROM external_sources WHERE person_id = ? ORDER BY created_at DESC`, [Number(personId)])
+    : await db.query(`SELECT * FROM external_sources ORDER BY created_at DESC`);
   return Response.json({ sources: rows }, { headers: corsHeaders() });
 }
 
@@ -22,9 +22,8 @@ export async function POST(req: NextRequest) {
   const provider = String(body.provider || '').trim();
   const url = body.url ? String(body.url) : null;
   if (!person_id || !provider) return new Response('person_id and provider required', { status: 400, headers: corsHeaders() });
-  const stmt = db.prepare(`INSERT INTO external_sources (person_id, provider, url) VALUES (?, ?, ?)`);
-  const info = stmt.run(person_id, provider, url);
-  const source = db.prepare(`SELECT * FROM external_sources WHERE id = ?`).get(info.lastInsertRowid as number);
+  const info = await db.run(`INSERT INTO external_sources (person_id, provider, url) VALUES (?, ?, ?)`, [person_id, provider, url]);
+  const source = await db.get(`SELECT * FROM external_sources WHERE id = ?`, [info.lastInsertRowid as number]);
   return Response.json({ source }, { status: 201, headers: corsHeaders() });
 }
 

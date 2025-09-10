@@ -298,6 +298,24 @@ function expandTaskInstances(task: Task, view: View, anchor: Date) {
 // realtime updates handled inline with incremental SSE handlers
 
 export default function Home() {
+  if (process.env.NEXT_PUBLIC_API_ONLY === '1') {
+    const pagesUrl = 'https://dheeraj2209.github.io/Flow_share/';
+    const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || '';
+    return (
+      <div className="min-h-screen grid place-items-center p-6">
+        <div className="max-w-xl text-center space-y-3">
+          <h1 className="text-2xl font-semibold">Flowshare API Server</h1>
+          <p className="opacity-80">This deployment serves API routes only. Visit the UI on GitHub Pages.</p>
+          <p>
+            <a className="btn btn-primary" href={pagesUrl}>Open UI</a>
+          </p>
+          {apiBase && (
+            <p className="text-xs opacity-60">API Base: {apiBase}</p>
+          )}
+        </div>
+      </div>
+    );
+  }
   const [people, setPeople] = useState<Person[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
   const [doneByDate, setDoneByDate] = useState<Map<string, Set<number>>>(new Map());
