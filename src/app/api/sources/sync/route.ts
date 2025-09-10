@@ -23,8 +23,8 @@ type DbExternalSource = {
 };
 
 type MsTodoLists = { value?: Array<{ id: string }>};
-type MsTodoItems = { value?: Array<{ id: string; title?: string; dueDateTime?: { dateTime?: string } }>};
-type MsEvents = { value?: Array<{ id: string; subject?: string; start?: { dateTime?: string } }>};
+type MsTodoItems = { value?: Array<{ id: string; title?: string; dueDateTime?: { dateTime?: string; timeZone?: string } }>};
+type MsEvents = { value?: Array<{ id: string; subject?: string; isAllDay?: boolean; start?: { dateTime?: string; timeZone?: string } }>};
 
 async function importICS(url: string, person_id: number, source_id: number) {
   const db = getDb();
@@ -36,10 +36,14 @@ async function importICS(url: string, person_id: number, source_id: number) {
     const title = String(ev.summary || 'Untitled').trim();
     const d = ev.start as Date | undefined;
     if (!d) continue;
-    const due_date = d.toISOString().slice(0,10);
+    // Use local components to avoid UTC date shifting for all-day events
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth()+1).padStart(2,'0');
+    const dd = String(d.getDate()).padStart(2,'0');
+    const due_date = `${yyyy}-${mm}-${dd}`;
     const hh = String(d.getHours()).padStart(2,'0');
-    const mm = String(d.getMinutes()).padStart(2,'0');
-    const due_time = `${hh}:${mm}`;
+    const mi = String(d.getMinutes()).padStart(2,'0');
+    const due_time = `${hh}:${mi}`;
     const external_id = String(ev.uid || k);
     tasks.push({ title, due_date, due_time, external_id });
   }
@@ -78,9 +82,10 @@ export async function POST(req: NextRequest) {
           if (items?.value?.length) {
             for (const it of items.value) {
               const title = it.title || 'Untitled';
-              const d = it.dueDateTime?.dateTime ? new Date(it.dueDateTime.dateTime) : null;
-              const due_date = d ? d.toISOString().slice(0,10) : null;
-              const due_time = d ? `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}` : null;
+              const dtStr = it.dueDateTime?.dateTime || null;
+              const due_date = dtStr ? dtStr.slice(0,10) : null;
+              const timePart = dtStr && dtStr.length >= 16 ? dtStr.slice(11,16) : null; // HH:mm
+              const due_time = timePart || null;
               const external_id = it.id;
               if (!due_date) continue;
               const selectRow = await db.get(`SELECT id FROM tasks WHERE source_id=? AND external_id=?`, [src.id, external_id]) as RowId | undefined;
@@ -104,10 +109,12 @@ export async function POST(req: NextRequest) {
       if (events?.value?.length) {
         for (const ev of events.value) {
           const title = ev.subject || 'Event';
-          const d = ev.start?.dateTime ? new Date(ev.start.dateTime) : null;
-          if (!d) continue;
-          const due_date = d.toISOString().slice(0,10);
-          const due_time = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
+          const dtStr = ev.start?.dateTime || null;
+          if (!dtStr) continue;
+          // For all-day events, store only the date; for timed events, take local HH:mm from the source string.
+          const isAllDay = !!(ev as any).isAllDay;
+          const due_date = dtStr.slice(0,10);
+          const due_time = isAllDay ? null : (dtStr.length >= 16 ? dtStr.slice(11,16) : null);
           const external_id = ev.id;
           const selectRow = await db.get(`SELECT id FROM tasks WHERE source_id=? AND external_id=?`, [src.id, external_id]) as RowId | undefined;
           if (selectRow?.id) {
