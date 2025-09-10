@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence, Reorder, useDragControls } from "framer-motion";
-// @ts-ignore - chrono-node has no ESM types here in this setup
+// @ts-expect-error - chrono-node has no ESM types here in this setup
 import * as chrono from 'chrono-node';
 import { Calendar, Check, ChevronLeft, ChevronRight, ListPlus, Plus, Share2, UserPlus, Users, Repeat, Clock, Trash2, Pencil, User, ChevronDown, Hash, Settings2, GripVertical, BookOpen } from "lucide-react";
 

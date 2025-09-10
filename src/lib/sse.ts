@@ -6,7 +6,7 @@ type Subscriber = {
 
 const subscribers = new Map<string, Subscriber>();
 
-function sseFormat(event: string, data: any) {
+function sseFormat(event: string, data: unknown) {
   const payload = typeof data === 'string' ? data : JSON.stringify(data);
   return `event: ${event}\n` + `data: ${payload}\n\n`;
 }
@@ -27,12 +27,12 @@ export function removeSubscriber(id: string) {
   }
 }
 
-export function broadcast(event: string, data: any) {
+export function broadcast(event: string, data: unknown) {
   const msg = sseFormat(event, data);
   for (const [, sub] of subscribers) {
     try {
       sub.write(msg);
-    } catch (e) {
+    } catch {
       try { sub.close(); } catch {}
     }
   }
@@ -45,4 +45,3 @@ setInterval(() => {
     try { sub.write(msg); } catch {}
   }
 }, 25000);
-
