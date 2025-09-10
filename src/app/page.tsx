@@ -48,19 +48,24 @@ type UserPrefs = {
 };
 
 function startOfWeek(d: Date) {
-  const date = new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), d.getUTCDate()));
-  const day = date.getUTCDay();
+  // Local timezone Monday-based start of week
+  const date = new Date(d.getFullYear(), d.getMonth(), d.getDate());
+  const day = date.getDay(); // 0=Sun..6=Sat
   const diff = (day + 6) % 7; // Mon=0
-  date.setUTCDate(date.getUTCDate() - diff);
+  date.setDate(date.getDate() - diff);
   return date;
 }
 
 function startOfMonth(d: Date) {
-  return new Date(Date.UTC(d.getUTCFullYear(), d.getUTCMonth(), 1));
+  return new Date(d.getFullYear(), d.getMonth(), 1);
 }
 
 function formatISODate(d: Date) {
-  return d.toISOString().slice(0, 10);
+  // Local date key YYYY-MM-DD (client timezone)
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
 }
 
 // Local date helpers for display (avoid UTC shifting in labels)
@@ -79,7 +84,7 @@ function formatLocalYearMonth(d: Date) {
 
 function addDays(d: Date, n: number) {
   const x = new Date(d);
-  x.setUTCDate(x.getUTCDate() + n);
+  x.setDate(x.getDate() + n);
   return x;
 }
 
@@ -97,10 +102,10 @@ function hhmmToMinutes(hhmm: string) {
 }
 
 function nextWeekday(from: Date, wd: number) {
-  const d = new Date(Date.UTC(from.getUTCFullYear(), from.getUTCMonth(), from.getUTCDate()));
-  const cur = d.getUTCDay();
+  const d = new Date(from.getFullYear(), from.getMonth(), from.getDate());
+  const cur = d.getDay();
   const diff = (wd + 7 - cur) % 7 || 7;
-  d.setUTCDate(d.getUTCDate() + diff);
+  d.setDate(d.getDate() + diff);
   return d;
 }
 
@@ -113,7 +118,8 @@ function parseQuickAdd(text: string, base: Date) {
     const p = parsed[0];
     const dt = p.start?.date?.() as Date | undefined;
     if (dt) {
-      result.due_date = formatISODate(new Date(Date.UTC(dt.getFullYear(), dt.getMonth(), dt.getDate())));
+      // Interpret parsed date in local timezone
+      result.due_date = formatISODate(dt);
       if (p.start?.isCertain('hour')) {
         const hh = String(dt.getHours()).padStart(2, '0');
         const mm = String(dt.getMinutes()).padStart(2, '0');
@@ -135,8 +141,8 @@ function parseQuickAdd(text: string, base: Date) {
     days.forEach((d,i) => { if (new RegExp(`\\b${d}(?:day)?\\b`).test(lower)) selected.push(i); });
     if (selected.length) result.byweekday = selected;
     else if (result.due_date) {
-      const dd = new Date(result.due_date + 'T00:00:00.000Z');
-      result.byweekday = [dd.getUTCDay()];
+      const dd = new Date(result.due_date + 'T00:00:00');
+      result.byweekday = [dd.getDay()];
     }
   }
   // Color and priority and assignee
@@ -182,9 +188,8 @@ function priorityClass(p?: number) {
 function parseDueDate(task: Task): Date | null {
   if (!task.due_date) return null;
   const time = task.due_time && /^\d{2}:\d{2}$/.test(task.due_time) ? task.due_time : '23:59';
-  // Treat due date/time as UTC for consistency
-  const iso = `${task.due_date}T${time}:00.000Z`;
-  const d = new Date(iso);
+  // Interpret due date/time in local timezone
+  const d = new Date(`${task.due_date}T${time}:00`);
   return isNaN(d.getTime()) ? null : d;
 }
 
@@ -253,15 +258,15 @@ function expandWeekly(task: Task, rangeStart: Date, rangeEnd: Date) {
 }
 
 function expandTaskInstances(task: Task, view: View, anchor: Date) {
-  const start = view === "day" ? anchor : view === "week" ? startOfWeek(anchor) : startOfMonth(anchor);
-  const end = view === "day" ? addDays(start, 1) : view === "week" ? addDays(start, 7) : new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1));
+  const start = view === "day" ? new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate()) : view === "week" ? startOfWeek(anchor) : startOfMonth(anchor);
+  const end = view === "day" ? addDays(start, 1) : view === "week" ? addDays(start, 7) : new Date(start.getFullYear(), start.getMonth() + 1, 1);
   const keyDate = (d: Date) => formatISODate(d);
   if (task.recurrence === "none") {
     // Single instance falls into bucket match
     if (task.bucket_type === view) {
       const t = task.bucket_date;
       if (t) {
-        const td = new Date(t + "T00:00:00.000Z");
+        const td = new Date(t + "T00:00:00");
         if (td >= start && td < end) return [keyDate(td)];
       }
     }
@@ -271,7 +276,7 @@ function expandTaskInstances(task: Task, view: View, anchor: Date) {
   if (task.recurrence === "daily") {
     const interval = Math.max(1, task.interval || 1);
     // Start from either bucket_date or start
-    let cur = task.bucket_date ? new Date(task.bucket_date + "T00:00:00.000Z") : start;
+    let cur = task.bucket_date ? new Date(task.bucket_date + "T00:00:00") : start;
     // Move cur to >= start
     if (cur < start) {
       const diffDays = Math.floor((start.getTime() - cur.getTime()) / 86400000);
@@ -279,7 +284,7 @@ function expandTaskInstances(task: Task, view: View, anchor: Date) {
       cur = addDays(cur, steps * interval);
     }
     const dates: string[] = [];
-    const until = task.until ? new Date(task.until + "T00:00:00.000Z") : null;
+    const until = task.until ? new Date(task.until + "T00:00:00") : null;
     while (cur < end && (!until || cur <= until)) {
       dates.push(keyDate(cur));
       cur = addDays(cur, interval);
@@ -294,15 +299,15 @@ function expandTaskInstances(task: Task, view: View, anchor: Date) {
   if (task.recurrence === "monthly") {
     // Occurs on the same day number each month starting from bucket_date
     const interval = Math.max(1, task.interval || 1);
-    const anchorDate = task.bucket_date ? new Date(task.bucket_date + "T00:00:00.000Z") : start;
-    const day = anchorDate.getUTCDate();
-    let cur = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), day));
-    if (cur < start) cur = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, day));
-    const until = task.until ? new Date(task.until + "T00:00:00.000Z") : null;
+    const anchorDate = task.bucket_date ? new Date(task.bucket_date + "T00:00:00") : start;
+    const day = anchorDate.getDate();
+    let cur = new Date(start.getFullYear(), start.getMonth(), day);
+    if (cur < start) cur = new Date(start.getFullYear(), start.getMonth() + 1, day);
+    const until = task.until ? new Date(task.until + "T00:00:00") : null;
     const dates: string[] = [];
     while (cur < end && (!until || cur <= until)) {
       if (cur >= start) dates.push(keyDate(cur));
-      cur = new Date(Date.UTC(cur.getUTCFullYear(), cur.getUTCMonth() + interval, day));
+      cur = new Date(cur.getFullYear(), cur.getMonth() + interval, day);
     }
     return dates;
   }
@@ -423,8 +428,8 @@ export default function Home() {
       return `${formatLocalISODate(s)} → ${formatLocalISODate(e)}`;
     }
     const s = startOfMonth(d);
-    const e = new Date(Date.UTC(s.getUTCFullYear(), s.getUTCMonth() + 1, 0));
-    return `${formatLocalISODate(s)} (${e.getUTCDate()} days)`;
+    const e = new Date(s.getFullYear(), s.getMonth() + 1, 0);
+    return `${formatLocalISODate(s)} (${e.getDate()} days)`;
   }, [anchor, view]);
 
   const refresh = useRef(0);
@@ -501,6 +506,22 @@ export default function Home() {
     window.addEventListener('keydown', onKey);
     return () => window.removeEventListener('keydown', onKey);
   }, [selected, tasks]);
+
+  // Update the anchor date at local midnight so "Today" rolls over automatically
+  useEffect(() => {
+    let timer: any;
+    const schedule = () => {
+      const now = new Date();
+      const next = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+      const delay = next.getTime() - now.getTime() + 1000; // 1s after midnight
+      timer = setTimeout(() => {
+        setAnchor(new Date());
+        schedule();
+      }, Math.max(1000, delay));
+    };
+    schedule();
+    return () => { if (timer) clearTimeout(timer); };
+  }, []);
   useEffect(() => {
     // SSE with incremental updates for low-latency sync
   const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || '';
@@ -562,12 +583,13 @@ export default function Home() {
   const grouped = useMemo(() => {
     // Build keys for the current view
     const map = new Map<string, Task[]>();
-    const start = view === 'day' ? new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth(), anchor.getUTCDate()))
+    const start = view === 'day'
+      ? new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate())
       : view === 'week' ? startOfWeek(anchor)
       : startOfMonth(anchor);
     const end = view === 'day' ? addDays(start, 1)
       : view === 'week' ? addDays(start, 7)
-      : new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + 1, 1));
+      : new Date(start.getFullYear(), start.getMonth() + 1, 1);
 
     const relevant = tasks.filter(t => selectedPerson ? (t.person_id === selectedPerson) : true);
     const push = (dateKey: string, task: Task) => {
@@ -579,19 +601,19 @@ export default function Home() {
       if (t.recurrence === 'none') {
         // Always include day-level tasks in wider views
         if (t.bucket_type === 'day' && t.bucket_date) {
-          const dt = new Date(t.bucket_date + 'T00:00:00.000Z');
+          const dt = new Date(t.bucket_date + 'T00:00:00');
           if (dt >= start && dt < end) push(t.bucket_date, t);
           continue;
         }
         // Include week-level tasks when viewing month (anchor on week start)
         if (view === 'month' && t.bucket_type === 'week' && t.bucket_date) {
-          const dt = new Date(t.bucket_date + 'T00:00:00.000Z');
+          const dt = new Date(t.bucket_date + 'T00:00:00');
           if (dt >= start && dt < end) push(t.bucket_date, t);
           continue;
         }
         // Include tasks anchored to the current view period
         if (t.bucket_type === view && t.bucket_date) {
-          const dt = new Date(t.bucket_date + 'T00:00:00.000Z');
+          const dt = new Date(t.bucket_date + 'T00:00:00');
           if (dt >= start && dt < end) push(t.bucket_date, t);
         }
         continue;
@@ -762,11 +784,11 @@ export default function Home() {
     }
   }
 
-  function changeAnchor(delta: number) {
-    if (view === 'day') setAnchor(addDays(anchor, delta));
-    else if (view === 'week') setAnchor(addDays(anchor, delta * 7));
-    else setAnchor(new Date(Date.UTC(anchor.getUTCFullYear(), anchor.getUTCMonth() + delta, anchor.getUTCDate())));
-  }
+function changeAnchor(delta: number) {
+  if (view === 'day') setAnchor(addDays(anchor, delta));
+  else if (view === 'week') setAnchor(addDays(anchor, delta * 7));
+  else setAnchor(new Date(anchor.getFullYear(), anchor.getMonth() + delta, anchor.getDate()));
+}
 
   const leftOffset = (!sidebarOpen || isMobile) ? 0 : sidebarWidth;
   return (
@@ -1265,32 +1287,32 @@ function TaskRow({ task, onToggle, onDelete, selected=false, onSelect, accentCol
 }
 
 function MiniCalendar({ value, onChange }: { value: Date; onChange: (d: Date) => void; }) {
-  const [month, setMonth] = useState(new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), 1)));
+  const [month, setMonth] = useState(new Date(value.getFullYear(), value.getMonth(), 1));
   const today = new Date();
   const start = startOfMonth(month);
-  const end = new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth() + 1, 0));
-  const startGrid = startOfWeek(new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1)));
+  const end = new Date(month.getFullYear(), month.getMonth() + 1, 0);
+  const startGrid = startOfWeek(new Date(start.getFullYear(), start.getMonth(), 1));
   const cells: Date[] = [];
   for (let i=0;i<42;i++) cells.push(addDays(startGrid, i));
-  const isSameDay = (a: Date, b: Date) => a.getUTCFullYear()===b.getUTCFullYear() && a.getUTCMonth()===b.getUTCMonth() && a.getUTCDate()===b.getUTCDate();
-  const sameMonth = (d: Date) => d.getUTCMonth() === month.getUTCMonth() && d.getUTCFullYear() === month.getUTCFullYear();
+  const isSameDay = (a: Date, b: Date) => a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate();
+  const sameMonth = (d: Date) => d.getMonth() === month.getMonth() && d.getFullYear() === month.getFullYear();
   return (
     <div className="card p-3">
       <div className="flex items-center justify-between mb-2">
-        <button className="btn btn-ghost" onClick={() => setMonth(new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth()-1, 1)))}><ChevronLeft size={14}/></button>
+        <button className="btn btn-ghost" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth()-1, 1))}><ChevronLeft size={14}/></button>
         <div className="text-sm font-medium">{formatLocalYearMonth(month)}</div>
-        <button className="btn btn-ghost" onClick={() => setMonth(new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth()+1, 1)))}><ChevronRight size={14}/></button>
+        <button className="btn btn-ghost" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth()+1, 1))}><ChevronRight size={14}/></button>
       </div>
       <div className="grid grid-cols-7 text-[11px] opacity-60 mb-1">
         {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d => <div key={d} className="text-center">{d}</div>)}
       </div>
       <div className="grid grid-cols-7 gap-1">
         {cells.map((d,i) => {
-          const isToday = isSameDay(d, new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate())));
+          const isToday = isSameDay(d, new Date(today.getFullYear(), today.getMonth(), today.getDate()));
           const selected = isSameDay(d, value);
           return (
             <button key={i} onClick={() => onChange(d)} className={`aspect-square rounded-md text-[12px] grid place-items-center border transition-colors ${selected ? 'bg-black text-white dark:bg-white dark:text-black' : sameMonth(d) ? 'hover:bg-black/5 dark:hover:bg-white/10' : 'opacity-40 hover:opacity-60 hover:bg-black/5 dark:hover:bg-white/10'}`}>
-              <span className={`${isToday && !selected ? 'underline' : ''}`}>{d.getUTCDate()}</span>
+              <span className={`${isToday && !selected ? 'underline' : ''}`}>{d.getDate()}</span>
             </button>
           );
         })}
@@ -1301,13 +1323,13 @@ function MiniCalendar({ value, onChange }: { value: Date; onChange: (d: Date) =>
 
 function CalendarGrid({ view, anchor, grouped, onDropTask, onReorderDay, onReorderPeriod, isSelected, onSelect, accentFor, personById, personColorMap, prefs, sortMode }: { view: View; anchor: Date; grouped: { start: Date; end: Date; days: [string, Task[]][] }; onDropTask: (taskIds: number[], dateStr: string) => void | Promise<void>; onReorderDay: (dateKey: string, reorderedIds: number[]) => void | Promise<void>; onReorderPeriod: (periodKey: string, reorderedIds: number[]) => void | Promise<void>; isSelected: (id: number)=>boolean; onSelect: (id: number, e: React.MouseEvent) => void; accentFor: (t: Task) => string; personById: Map<number, Person>; personColorMap: Map<number, string>; prefs: UserPrefs; sortMode: 'manual'|'priority'|'due'; }) {
   const start = view === 'week' ? startOfWeek(anchor) : startOfMonth(anchor);
-  const startGrid = view === 'week' ? start : startOfWeek(new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1)));
+  const startGrid = view === 'week' ? start : startOfWeek(new Date(start.getFullYear(), start.getMonth(), 1));
   const cells: Date[] = [];
   const total = view === 'week' ? 7 : 42;
   for (let i=0;i<total;i++) cells.push(addDays(startGrid, i));
   const map = new Map(grouped.days);
   const [overKey, setOverKey] = useState<string | null>(null);
-  const isSameDay = (a: Date, b: Date) => a.getUTCFullYear()===b.getUTCFullYear() && a.getUTCMonth()===b.getUTCMonth() && a.getUTCDate()===b.getUTCDate();
+  const isSameDay = (a: Date, b: Date) => a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate();
   const today = new Date();
   // Banners: week/month scoped tasks for current period
   const banners: Task[] = [];
@@ -1376,8 +1398,8 @@ function CalendarGrid({ view, anchor, grouped, onDropTask, onReorderDay, onReord
           const key = formatISODate(d);
           const recurring = (map.get(key) || []).filter(t => t.recurrence !== 'none');
           const dayItems = (map.get(key) || []).filter(t => t && t.recurrence === 'none' && t.bucket_type === 'day');
-          const dim = view==='month' && d.getUTCMonth() !== start.getUTCMonth();
-          const isToday = isSameDay(d, new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate())));
+          const dim = view==='month' && d.getMonth() !== start.getMonth();
+          const isToday = isSameDay(d, new Date(today.getFullYear(), today.getMonth(), today.getDate()));
           return (
             <div key={idx}
               onDragOver={(e)=>{ e.preventDefault(); setOverKey(key); }}
@@ -1404,7 +1426,7 @@ function CalendarGrid({ view, anchor, grouped, onDropTask, onReorderDay, onReord
               className={`min-h-28 rounded-md border p-2 flex flex-col gap-1 transition-colors ${dim? 'opacity-50':''} ${overKey===key? 'ring-2 ring-black/40 dark:ring-white/40':''}`}
             >
               <div className="flex items-center justify-between text-[11px] opacity-70">
-                <span>{d.getUTCDate()}</span>
+                <span>{d.getDate()}</span>
                 {isToday && <span className="size-1.5 rounded-full bg-emerald-500"></span>}
               </div>
               {sortMode==='manual' ? (
