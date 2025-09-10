@@ -21,7 +21,7 @@ export async function POST(req: NextRequest) {
   const person_id = Number(body.person_id);
   const provider = String(body.provider || '').trim();
   const url = body.url ? String(body.url) : null;
-  if (!person_id || !provider) return new Response('person_id and provider required', { status: 400 });
+  if (!person_id || !provider) return new Response('person_id and provider required', { status: 400, headers: corsHeaders() });
   const stmt = db.prepare(`INSERT INTO external_sources (person_id, provider, url) VALUES (?, ?, ?)`);
   const info = stmt.run(person_id, provider, url);
   const source = db.prepare(`SELECT * FROM external_sources WHERE id = ?`).get(info.lastInsertRowid as number);

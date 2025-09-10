@@ -18,7 +18,7 @@ export async function POST(req: NextRequest) {
   const name = String(body.name || '').trim();
   const email = body.email ? String(body.email).trim() : null;
   let color = body.color ? String(body.color) : null;
-  if (!name) return new Response('Name required', { status: 400 });
+  if (!name) return new Response('Name required', { status: 400, headers: corsHeaders() });
   if (!color) {
     const palette = ['#ef4444','#f97316','#eab308','#22c55e','#06b6d4','#3b82f6','#8b5cf6','#ec4899'];
     color = palette[Math.floor(Math.random() * palette.length)];

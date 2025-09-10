@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { getDb } from '@/lib/db';
 import { broadcast } from '@/lib/sse';
+import { corsHeaders, preflight } from '@/lib/cors';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -8,8 +9,8 @@ export const dynamic = 'force-dynamic';
 export async function GET(_: NextRequest, { params }: { params: { id: string } }) {
   const db = getDb();
   const task = db.prepare(`SELECT * FROM tasks WHERE id = ?`).get(Number(params.id));
-  if (!task) return new Response('Not found', { status: 404 });
-  return Response.json({ task });
+  if (!task) return new Response('Not found', { status: 404, headers: corsHeaders() });
+  return Response.json({ task }, { headers: corsHeaders() });
 }
 
 export async function PUT(req: NextRequest, { params }: { params: { id: string } }) {
@@ -44,7 +45,7 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   db.prepare(sql).run(...values);
   const task = db.prepare(`SELECT * FROM tasks WHERE id = ?`).get(id);
   broadcast('task_updated', { task });
-  return Response.json({ task });
+  return Response.json({ task }, { headers: corsHeaders() });
 }
 
 export async function DELETE(_: NextRequest, { params }: { params: { id: string } }) {
@@ -54,5 +55,9 @@ export async function DELETE(_: NextRequest, { params }: { params: { id: string 
   if (!task) return new Response('Not found', { status: 404 });
   db.prepare(`DELETE FROM tasks WHERE id = ?`).run(id);
   broadcast('task_deleted', { id });
-  return new Response(null, { status: 204 });
+  return new Response(null, { status: 204, headers: corsHeaders() });
+}
+
+export async function OPTIONS() {
+  return preflight();
 }

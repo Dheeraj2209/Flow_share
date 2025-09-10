@@ -22,7 +22,7 @@ export async function POST(req: NextRequest) {
   const db = getDb();
   const body = await req.json().catch(() => ({} as any));
   const title = String(body.title || '').trim();
-  if (!title) return new Response('Title required', { status: 400 });
+  if (!title) return new Response('Title required', { status: 400, headers: corsHeaders() });
   const description = body.description ? String(body.description) : null;
   const person_id = body.person_id != null ? Number(body.person_id) : null;
   const status = body.status && ['todo','in_progress','done'].includes(body.status) ? body.status : 'todo';
