@@ -5,109 +5,11 @@ import { motion, AnimatePresence, Reorder, useDragControls } from "framer-motion
 // @ts-expect-error - chrono-node has no ESM types here in this setup
 import * as chrono from 'chrono-node';
 import { Calendar, Check, ChevronLeft, ChevronRight, ListPlus, Plus, Share2, UserPlus, Users, Repeat, Clock, Trash2, Pencil, User, ChevronDown, Hash, Settings2, GripVertical, BookOpen } from "lucide-react";
+import MiniCalendar from '@/components/MiniCalendar';
+import { Person, Task, ExternalSource, View, UserPrefs } from '@/types';
+import { startOfWeek, startOfMonth, formatISODate, formatLocalISODate, formatLocalYearMonth, addDays, minutesToHHMM, hhmmToMinutes, nextWeekday, parseDueDate as parseDueDateUtil, isOverdueDate, formatTimeLocal, formatDateLocal } from '@/lib/date';
 
-type Person = {
-  id: number;
-  name: string;
-  email?: string | null;
-  color?: string | null;
-};
-
-type Task = {
-  id: number;
-  title: string;
-  description?: string | null;
-  person_id?: number | null;
-  status: "todo" | "in_progress" | "done";
-  due_date?: string | null;
-  due_time?: string | null;
-  bucket_type?: "day" | "week" | "month" | null;
-  bucket_date?: string | null;
-  recurrence: "none" | "daily" | "weekly" | "monthly";
-  interval: number;
-  byweekday?: string | null; // JSON array
-  until?: string | null;
-  sort?: number;
-  color?: string | null;
-  priority?: number; // 0 none, 1 low, 2 med, 3 high
-};
-
-type ExternalSource = {
-  id: number;
-  person_id: number;
-  provider: string;
-  url?: string | null;
-};
-
-type View = "day" | "week" | "month";
-
-type UserPrefs = {
-  relativeDates: boolean;
-  timeFormat: '12h' | '24h';
-  dateFormat: 'YYYY-MM-DD' | 'MM/DD' | 'DD/MM';
-};
-
-function startOfWeek(d: Date) {
-  // Local timezone Monday-based start of week
-  const date = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  const day = date.getDay(); // 0=Sun..6=Sat
-  const diff = (day + 6) % 7; // Mon=0
-  date.setDate(date.getDate() - diff);
-  return date;
-}
-
-function startOfMonth(d: Date) {
-  return new Date(d.getFullYear(), d.getMonth(), 1);
-}
-
-function formatISODate(d: Date) {
-  // Local date key YYYY-MM-DD (client timezone)
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-// Local date helpers for display (avoid UTC shifting in labels)
-function formatLocalISODate(d: Date) {
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  const dd = String(d.getDate()).padStart(2, '0');
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-function formatLocalYearMonth(d: Date) {
-  const yyyy = d.getFullYear();
-  const mm = String(d.getMonth() + 1).padStart(2, '0');
-  return `${yyyy}-${mm}`;
-}
-
-function addDays(d: Date, n: number) {
-  const x = new Date(d);
-  x.setDate(x.getDate() + n);
-  return x;
-}
-
-function minutesToHHMM(mins: number) {
-  const m = Math.max(0, Math.min(1435, Math.round(mins)));
-  const hh = String(Math.floor(m / 60)).padStart(2, '0');
-  const mm = String(m % 60).padStart(2, '0');
-  return `${hh}:${mm}`;
-}
-
-function hhmmToMinutes(hhmm: string) {
-  const m = /^([0-1]?\d|2[0-3]):([0-5]\d)$/.exec(hhmm);
-  if (!m) return 0;
-  return parseInt(m[1]) * 60 + parseInt(m[2]);
-}
-
-function nextWeekday(from: Date, wd: number) {
-  const d = new Date(from.getFullYear(), from.getMonth(), from.getDate());
-  const cur = d.getDay();
-  const diff = (wd + 7 - cur) % 7 || 7;
-  d.setDate(d.getDate() + diff);
-  return d;
-}
+// moved to '@/lib/date'
 
 function parseQuickAdd(text: string, base: Date) {
   const result: { title: string; due_date?: string; due_time?: string; recurrence?: Task['recurrence']; byweekday?: number[]; interval?: number; color?: string; priority?: number; assignee?: string; scope?: View } = { title: text.trim() };
@@ -186,48 +88,15 @@ function priorityClass(p?: number) {
 }
 
 function parseDueDate(task: Task): Date | null {
-  if (!task.due_date) return null;
-  const time = task.due_time && /^\d{2}:\d{2}$/.test(task.due_time) ? task.due_time : '23:59';
-  // Interpret due date/time in local timezone
-  const d = new Date(`${task.due_date}T${time}:00`);
-  return isNaN(d.getTime()) ? null : d;
+  return parseDueDateUtil(task.due_date, task.due_time);
 }
 
 function isOverdue(task: Task): boolean {
   if (task.status === 'done') return false;
-  const d = parseDueDate(task);
-  if (!d) return false;
-  return Date.now() > d.getTime();
+  return isOverdueDate(parseDueDate(task));
 }
 
-function formatTimeLocal(d: Date, prefs: UserPrefs) {
-  const h = d.getHours();
-  const m = d.getMinutes();
-  if (prefs.timeFormat === '12h') {
-    const ampm = h >= 12 ? 'PM' : 'AM';
-    const hh = ((h + 11) % 12) + 1;
-    return `${String(hh)}:${String(m).padStart(2,'0')} ${ampm}`;
-  }
-  return `${String(h).padStart(2,'0')}:${String(m).padStart(2,'0')}`;
-}
-
-function formatDateLocal(d: Date, prefs: UserPrefs) {
-  const today = new Date();
-  const a = new Date(today.getFullYear(), today.getMonth(), today.getDate());
-  const b = new Date(d.getFullYear(), d.getMonth(), d.getDate());
-  const diffDays = Math.round((b.getTime() - a.getTime()) / 86400000);
-  if (prefs.relativeDates) {
-    if (diffDays === 0) return 'Today';
-    if (diffDays === 1) return 'Tomorrow';
-    if (diffDays === -1) return 'Yesterday';
-    if (diffDays > 1 && diffDays < 7) {
-      return d.toLocaleDateString(undefined, { weekday: 'short' });
-    }
-  }
-  if (prefs.dateFormat === 'MM/DD') return `${String(d.getMonth()+1).padStart(2,'0')}/${String(d.getDate()).padStart(2,'0')}`;
-  if (prefs.dateFormat === 'DD/MM') return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`;
-  return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
-}
+// formatTimeLocal/formatDateLocal moved to '@/lib/date'
 
 function formatDueLabel(task: Task, prefs: UserPrefs) {
   if (!task.due_date && !task.due_time) return '';
@@ -1288,41 +1157,7 @@ function TaskRow({ task, onToggle, onDelete, selected=false, onSelect, accentCol
   );
 }
 
-function MiniCalendar({ value, onChange }: { value: Date; onChange: (d: Date) => void; }) {
-  const [month, setMonth] = useState(new Date(value.getFullYear(), value.getMonth(), 1));
-  const today = new Date();
-  const start = startOfMonth(month);
-  const end = new Date(month.getFullYear(), month.getMonth() + 1, 0);
-  const startGrid = startOfWeek(new Date(start.getFullYear(), start.getMonth(), 1));
-  const cells: Date[] = [];
-  for (let i=0;i<42;i++) cells.push(addDays(startGrid, i));
-  const isSameDay = (a: Date, b: Date) => a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate();
-  const sameMonth = (d: Date) => d.getMonth() === month.getMonth() && d.getFullYear() === month.getFullYear();
-  return (
-    <div className="card p-3">
-      <div className="flex items-center justify-between mb-2">
-        <button className="btn btn-ghost" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth()-1, 1))}><ChevronLeft size={14}/></button>
-        <div className="text-sm font-medium">{formatLocalYearMonth(month)}</div>
-        <button className="btn btn-ghost" onClick={() => setMonth(new Date(month.getFullYear(), month.getMonth()+1, 1))}><ChevronRight size={14}/></button>
-      </div>
-      <div className="grid grid-cols-7 text-[11px] opacity-60 mb-1">
-        {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d => <div key={d} className="text-center">{d}</div>)}
-      </div>
-      <div className="grid grid-cols-7 gap-1">
-        {cells.map((d,i) => {
-          const isToday = isSameDay(d, new Date(today.getFullYear(), today.getMonth(), today.getDate()));
-          const selected = isSameDay(d, value);
-          // Shade only the selected day; keep today with underline only
-          return (
-            <button key={i} onClick={() => onChange(d)} className={`aspect-square rounded-md text-[12px] grid place-items-center border transition-colors ${selected ? 'bg-white text-black' : sameMonth(d) ? 'hover:bg-black/5 dark:hover:bg-white/10' : 'opacity-40 hover:opacity-60 hover:bg-black/5 dark:hover:bg-white/10'}`}>
-              <span className={`${isToday && !selected ? 'underline' : ''}`}>{d.getDate()}</span>
-            </button>
-          );
-        })}
-      </div>
-    </div>
-  );
-}
+// MiniCalendar component moved to '@/components/MiniCalendar'
 
 function CalendarGrid({ view, anchor, grouped, onDropTask, onReorderDay, onReorderPeriod, isSelected, onSelect, accentFor, personById, personColorMap, prefs, sortMode }: { view: View; anchor: Date; grouped: { start: Date; end: Date; days: [string, Task[]][] }; onDropTask: (taskIds: number[], dateStr: string) => void | Promise<void>; onReorderDay: (dateKey: string, reorderedIds: number[]) => void | Promise<void>; onReorderPeriod: (periodKey: string, reorderedIds: number[]) => void | Promise<void>; isSelected: (id: number)=>boolean; onSelect: (id: number, e: React.MouseEvent) => void; accentFor: (t: Task) => string; personById: Map<number, Person>; personColorMap: Map<number, string>; prefs: UserPrefs; sortMode: 'manual'|'priority'|'due'; }) {
   const start = view === 'week' ? startOfWeek(anchor) : startOfMonth(anchor);
