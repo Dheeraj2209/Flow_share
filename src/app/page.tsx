@@ -516,6 +516,7 @@ export default function Home() {
 
     const relevant = tasks.filter(t => selectedPerson ? (t.person_id === selectedPerson) : true);
     const push = (dateKey: string, task: Task) => {
+      if (!task) return;
       if (!map.has(dateKey)) map.set(dateKey, []);
       map.get(dateKey)!.push(task);
     };
@@ -577,22 +578,22 @@ export default function Home() {
   // Progress maps for current view window (unique tasks in range)
   const progressAll = useMemo(() => {
     const ids = new Set<number>();
-    for (const [, items] of grouped.days) for (const t of items) ids.add(t.id);
+    for (const [, items] of grouped.days) for (const t of items) { if (t && typeof t.id === 'number') ids.add(t.id); }
     let done = 0, total = 0;
-    for (const t of tasks) if (ids.has(t.id)) { total++; if (t.status === 'done') done++; }
+    for (const t of tasks) if (t && typeof t.id === 'number' && ids.has(t.id)) { total++; if (t.status === 'done') done++; }
     return { done, total };
   }, [grouped, tasks]);
 
   const progressByPerson = useMemo(() => {
     const idsByPerson = new Map<number, Set<number>>();
-    for (const [, items] of grouped.days) for (const t of items) if (t.person_id != null) {
+    for (const [, items] of grouped.days) for (const t of items) if (t && t.person_id != null) {
       if (!idsByPerson.has(t.person_id)) idsByPerson.set(t.person_id, new Set());
-      idsByPerson.get(t.person_id)!.add(t.id);
+      idsByPerson.get(t.person_id)!.add(t.id as number);
     }
     const map = new Map<number, {done:number,total:number}>();
     for (const [pid, ids] of idsByPerson) {
       let done = 0, total = 0;
-      for (const t of tasks) if (ids.has(t.id)) { total++; if (t.status === 'done') done++; }
+      for (const t of tasks) if (t && typeof t.id === 'number' && ids.has(t.id)) { total++; if (t.status === 'done') done++; }
       map.set(pid, { done, total });
     }
     return map;
@@ -654,6 +655,7 @@ export default function Home() {
     const updates: { id: number; sort: number }[] = [];
     let idx = 0;
     for (const t of reordered) {
+      if (!t) continue;
       // Keep original order for non-day tasks
       if (t.bucket_type === 'day' && t.bucket_date === dateKey) {
         const current = t.sort ?? 0;
@@ -666,7 +668,9 @@ export default function Home() {
     setTasks(prev => {
       const map = new Map(prev.map(p => [p.id, p] as const));
       for (const t of reordered) {
-        map.set(t.id, { ...map.get(t.id)!, sort: t.sort });
+        if (!t) continue;
+        const cur = map.get(t.id);
+        map.set(t.id, { ...(cur || t), sort: t.sort });
       }
       return Array.from(map.values());
     });
@@ -977,14 +981,16 @@ export default function Home() {
               <div className="opacity-60">No tasks yet. Add one below.</div>
             )}
             <AnimatePresence initial={false}>
-              {grouped.days.map(([date, items]) => (
+              {grouped.days.map(([date, items]) => {
+                const safeItems = (items || []).filter(Boolean) as Task[];
+                return (
                 <motion.section key={date} layout initial={{opacity:0, y:8}} animate={{opacity:1, y:0}} exit={{opacity:0, y:-8}}>
                   <h3 className="font-medium mb-3 flex items-center gap-2"><Calendar size={14} /> {date}</h3>
-                  <Reorder.Group as="div" axis="y" values={items} onReorder={(reordered) => onReorderDay(date, reordered)}>
+                  <Reorder.Group as="div" axis="y" values={safeItems} onReorder={(reordered) => onReorderDay(date, reordered as Task[])}>
                      <AnimatePresence initial={false}>
-                       {items.map(task => (
-                         <ReorderableRow key={task.id} value={task}>
-                           {(start)=> (
+                        {safeItems.map(task => (
+                          <ReorderableRow key={task.id} value={task}>
+                            {(start)=> (
                         <TaskRow task={task} selected={selected.has(task.id)} accentColor={accentFor(task)} prefs={prefs}
                           onSelect={(id,e)=>{
                               setSelected(prev => {
@@ -1005,8 +1011,8 @@ export default function Home() {
                         ))}
                       </AnimatePresence>
                   </Reorder.Group>
-                </motion.section>
-              ))}
+                 </motion.section>
+               );})}
             </AnimatePresence>
           </div>
         )}
@@ -1200,7 +1206,7 @@ function CalendarGrid({ view, anchor, grouped, onDropTask, onReorderDay, isSelec
         {cells.map((d, idx) => {
           const key = formatISODate(d);
           const recurring = (map.get(key) || []).filter(t => t.recurrence !== 'none');
-          const dayItems = (map.get(key) || []).filter(t => t.recurrence === 'none' && t.bucket_type === 'day');
+          const dayItems = (map.get(key) || []).filter(t => t && t.recurrence === 'none' && t.bucket_type === 'day');
           const dim = view==='month' && d.getUTCMonth() !== start.getUTCMonth();
           const isToday = isSameDay(d, new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate())));
           return (
@@ -1232,7 +1238,7 @@ function CalendarGrid({ view, anchor, grouped, onDropTask, onReorderDay, isSelec
                 <span>{d.getUTCDate()}</span>
                 {isToday && <span className="size-1.5 rounded-full bg-emerald-500"></span>}
               </div>
-              <Reorder.Group as="div" axis="y" values={dayItems} onReorder={(reordered) => onReorderDay(key, reordered)}>
+              <Reorder.Group as="div" axis="y" values={dayItems} onReorder={(reordered) => onReorderDay(key, reordered as Task[])}>
                 <div className="flex flex-col gap-1">
                   {dayItems.map(t => (
                     <ReorderableChip key={t.id} task={t} value={t}>
