@@ -1,34 +1,11 @@
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
-import { createClient, Client as LibsqlClient } from '@libsql/client';
 
-type Row = Record<string, unknown>;
+let db: Database.Database | null = null;
 
-type Stmt = {
-  run: (...args: unknown[]) => { lastInsertRowid?: number | bigint } | void;
-  get: (...args: unknown[]) => Row | undefined;
-  all: (...args: unknown[]) => Row[];
-};
-
-type DBLike = {
-  prepare: (sql: string) => Stmt;
-  pragma?: (sql: string) => void;
-};
-
-let db: DBLike | null = null;
-
-export function getDb(): DBLike {
+export function getDb() {
   if (db) return db;
-  // Prefer remote libSQL (Turso) if configured
-  const libsqlUrl = process.env.LIBSQL_URL;
-  const libsqlToken = process.env.LIBSQL_AUTH_TOKEN;
-  if (libsqlUrl) {
-    const client: LibsqlClient = createClient({ url: libsqlUrl, authToken: libsqlToken });
-    db = libsqlAdapter(client);
-    migrate(db);
-    return db;
-  }
   const cfg = process.env.DATA_DIR;
   let dataDir = cfg
     ? (path.isAbsolute(cfg) ? cfg : path.join(process.cwd(), cfg))
@@ -46,14 +23,13 @@ export function getDb(): DBLike {
     }
   }
   const file = path.join(dataDir, 'app.db');
-  const native = new Database(file);
-  native.pragma('journal_mode = WAL');
-  db = betterSqliteAdapter(native);
+  db = new Database(file);
+  db.pragma('journal_mode = WAL');
   migrate(db);
   return db;
 }
 
-function migrate(db: DBLike) {
+function migrate(db: Database.Database) {
   // people table
   db.prepare(`
     CREATE TABLE IF NOT EXISTS people (
@@ -160,43 +136,6 @@ function migrate(db: DBLike) {
       db.prepare(`ALTER TABLE people ADD COLUMN color TEXT`).run();
     }
   } catch {}
-}
-
-function betterSqliteAdapter(native: Database.Database): DBLike {
-  return {
-    prepare(sql: string): Stmt {
-      const s = native.prepare(sql);
-      return {
-        run: (...args: unknown[]) => s.run(...(args as any[])),
-        get: (...args: unknown[]) => s.get(...(args as any[])) as Row | undefined,
-        all: (...args: unknown[]) => s.all(...(args as any[])) as Row[],
-      };
-    },
-    pragma: (sql: string) => native.pragma(sql),
-  };
-}
-
-function libsqlAdapter(client: LibsqlClient): DBLike {
-  return {
-    prepare(sql: string): Stmt {
-      return {
-        run: (...args: unknown[]) => {
-          const res = client.execute({ sql, args: args as any[] });
-          // libsql returns a Promise; keep API symmetric by blocking callers? Our routes are async.
-          // But current code calls .run() synchronously. Wrap with deasync? Instead, run synchronously-like by throwing if called.
-          // To keep minimal changes, we must make execute sync-like. Since that's not possible, we switch to a simple shim:
-          // We execute synchronously by calling execSync via Atomics? Not safe. Simpler: use .executeSync if available.
-          throw new Error('Synchronous run() used with libsql. Please use GET/POST handlers that call .all/.get via async path.');
-        },
-        get: (...args: unknown[]) => {
-          throw new Error('Synchronous get() used with libsql. Please refactor to async or use better-sqlite3.');
-        },
-        all: (...args: unknown[]) => {
-          throw new Error('Synchronous all() used with libsql. Please refactor to async or use better-sqlite3.');
-        },
-      };
-    },
-  } as DBLike;
 }
 
 export type Person = {
