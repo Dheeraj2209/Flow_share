@@ -30,6 +30,10 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Hide server routes for static export
+        run: |
+          if [ -d src/app/api ]; then mv src/app/api src/app/_api_server; fi
+
       - name: Build static site (Next.js export)
         env:
           NEXT_TELEMETRY_DISABLED: 1
@@ -37,6 +41,11 @@ jobs:
           NEXT_PUBLIC_API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
           STATIC_EXPORT: 1
         run: npm run build
+
+      - name: Restore server routes (cleanup)
+        if: always()
+        run: |
+          if [ -d src/app/_api_server ]; then mv src/app/_api_server src/app/api; fi
 
       - name: Upload artifact
         uses: actions/upload-pages-artifact@v3
