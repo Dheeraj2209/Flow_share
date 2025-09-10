@@ -2,10 +2,9 @@
 
 import { useMemo } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { addDays, formatLocalYearMonth, startOfMonth, startOfWeek, dateKeyInZone } from '@/lib/date';
+import { addDays, formatLocalYearMonth, startOfMonth, startOfWeek } from '@/lib/date';
 
 export default function MiniCalendar({ value, onChange }: { value: Date; onChange: (d: Date) => void; }) {
-  console.log('MiniCalendar value:', value);
   const month = useMemo(() => new Date(value.getFullYear(), value.getMonth(), 1), [value]);
   const today = new Date();
   const start = startOfMonth(month);
@@ -13,9 +12,6 @@ export default function MiniCalendar({ value, onChange }: { value: Date; onChang
   const cells: Date[] = [];
   for (let i = 0; i < 42; i++) cells.push(addDays(startGrid, i));
   const sameMonth = (d: Date) => d.getMonth() === month.getMonth() && d.getFullYear() === month.getFullYear();
-
-  const todayKey = dateKeyInZone(today);
-  const selectedKey = dateKeyInZone(value);
 
   return (
     <div className="card p-3">
@@ -29,9 +25,8 @@ export default function MiniCalendar({ value, onChange }: { value: Date; onChang
       </div>
       <div className="grid grid-cols-7 gap-1">
         {cells.map((d, i) => {
-          const cellKey = dateKeyInZone(d);
-          const isToday = cellKey === todayKey;
-          const isSelected = cellKey === selectedKey;
+          const isToday = d.getFullYear() === today.getFullYear() && d.getMonth() === today.getMonth() && d.getDate() === today.getDate();
+          const isSelected = d.getFullYear() === value.getFullYear() && d.getMonth() === value.getMonth() && d.getDate() === value.getDate();
 
           let className = 'aspect-square rounded-md text-[12px] grid place-items-center border transition-colors ';
 
