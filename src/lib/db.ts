@@ -6,7 +6,10 @@ let db: Database.Database | null = null;
 
 export function getDb() {
   if (db) return db;
-  const dataDir = path.join(process.cwd(), 'data');
+  const cfg = process.env.DATA_DIR;
+  const dataDir = cfg
+    ? (path.isAbsolute(cfg) ? cfg : path.join(process.cwd(), cfg))
+    : path.join(process.cwd(), 'data');
   if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
   const file = path.join(dataDir, 'app.db');
   db = new Database(file);

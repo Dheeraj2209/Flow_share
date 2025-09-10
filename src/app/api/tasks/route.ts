@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { getDb } from '@/lib/db';
 import { broadcast } from '@/lib/sse';
+import { corsHeaders, preflight } from '@/lib/cors';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -14,7 +15,7 @@ export async function GET(req: NextRequest) {
   if (personId) { where.push('person_id = ?'); params.push(Number(personId)); }
   const sql = `SELECT * FROM tasks ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY created_at DESC`;
   const tasks = db.prepare(sql).all(...params);
-  return Response.json({ tasks });
+  return Response.json({ tasks }, { headers: corsHeaders() });
 }
 
 export async function POST(req: NextRequest) {
@@ -49,5 +50,9 @@ export async function POST(req: NextRequest) {
   const info = stmt.run(title, description, person_id, status, due_date, due_time, bucket_type, bucket_date, recurrence, interval, byweekday, until, sort, color, priority);
   const task = db.prepare(`SELECT * FROM tasks WHERE id = ?`).get(info.lastInsertRowid as number);
   broadcast('task_created', { task });
-  return Response.json({ task }, { status: 201 });
+  return Response.json({ task }, { status: 201, headers: corsHeaders() });
+}
+
+export async function OPTIONS() {
+  return preflight();
 }

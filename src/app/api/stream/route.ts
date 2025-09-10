@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { addSubscriber, removeSubscriber } from '@/lib/sse';
+import { getCorsOrigin } from '@/lib/cors';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -25,10 +26,9 @@ export async function GET(req: NextRequest) {
     'Content-Type': 'text/event-stream',
     'Cache-Control': 'no-cache, no-transform',
     'Connection': 'keep-alive',
-    // Allow CORS for same-origin clients and multi-tab
-    'Access-Control-Allow-Origin': '*',
+    // Allow CORS for cross-origin EventSource
+    'Access-Control-Allow-Origin': getCorsOrigin(),
   });
 
   return new Response(ts.readable, { headers, status: 200 });
 }
-

@@ -380,8 +380,8 @@ export default function Home() {
     setError(null);
     try {
       const [pRes, tRes] = await Promise.all([
-        fetch('/api/people').then(r => r.json()),
-        fetch('/api/tasks').then(r => r.json()),
+        fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/people`).then(r => r.json()),
+        fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/tasks`).then(r => r.json()),
       ]);
       setPeople(pRes.people || []);
       setTasks(tRes.tasks || []);
@@ -399,7 +399,7 @@ export default function Home() {
   useEffect(() => {
     // fetch sources for selected person
     if (selectedPerson != null) {
-      fetch(`/api/sources?personId=${selectedPerson}`).then(r=>r.json()).then(d=> setSources(d.sources||[])).catch(()=>setSources([]));
+      fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/sources?personId=${selectedPerson}`).then(r=>r.json()).then(d=> setSources(d.sources||[])).catch(()=>setSources([]));
     }
   }, [selectedPerson]);
 
@@ -430,7 +430,7 @@ export default function Home() {
             if (!t || t.bucket_type !== 'day') continue;
             const mins = hhmmToMinutes((t.due_time || '09:00')) + delta;
             const clamped = Math.max(0, Math.min(1435, mins));
-            await fetch(`/api/tasks/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ due_time: minutesToHHMM(clamped) }) });
+            await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/tasks/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ due_time: minutesToHHMM(clamped) }) });
           }
         })();
       }
@@ -440,7 +440,8 @@ export default function Home() {
   }, [selected, tasks]);
   useEffect(() => {
     // SSE with incremental updates for low-latency sync
-    const src = new EventSource("/api/stream");
+  const apiBase = process.env.NEXT_PUBLIC_API_BASE_URL || '';
+  const src = new EventSource(`${apiBase}/api/stream`);
     const onOpen = () => setConnected(true);
     const onError = () => setConnected(false);
     const onPing = () => setConnected(true);
@@ -575,7 +576,7 @@ export default function Home() {
   async function addPerson(formData: FormData) {
     const name = String(formData.get('name') || '').trim();
     if (!name) return;
-    const res = await fetch('/api/people', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/people`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
     try {
       const data = await res.json();
       if (data?.person) setPeople(prev => prev.some(p=>p.id===data.person.id) ? prev : [...prev, data.person]);
@@ -589,7 +590,7 @@ export default function Home() {
     const status = task.status === 'done' ? 'todo' : 'done';
     // optimistic update
     setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status } : t));
-    fetch(`/api/tasks/${task.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }).catch(()=>{
+    fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/tasks/${task.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }).catch(()=>{
       // fallback re-fetch if needed
       fetchAll();
     });
@@ -599,7 +600,7 @@ export default function Home() {
     if (!confirm('Delete task?')) return;
     // optimistic
     setTasks(prev => prev.filter(t => t.id !== task.id));
-    fetch(`/api/tasks/${task.id}`, { method: 'DELETE' }).catch(()=>{
+    fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/tasks/${task.id}`, { method: 'DELETE' }).catch(()=>{
       fetchAll();
     });
   }
@@ -628,7 +629,7 @@ export default function Home() {
     });
     // Persist sequentially
     for (const u of updates) {
-      await fetch(`/api/tasks/${u.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sort: u.sort }) });
+      await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/tasks/${u.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sort: u.sort }) });
     }
   }
 
@@ -732,7 +733,7 @@ export default function Home() {
               <div className="text-xs opacity-70">Person color</div>
               <ColorDots value={people.find(p=>p.id===selectedPerson)?.color || null} onChange={async (c)=>{
                 const id = selectedPerson!;
-                await fetch(`/api/people/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ color: c }) });
+                await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/people/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ color: c }) });
                 setPeople(prev => prev.map(p => p.id===id ? { ...p, color: c || null } : p));
               }} />
               <div className="mt-4">
@@ -750,7 +751,7 @@ export default function Home() {
                       <input className="border rounded-md px-2 py-1 flex-1" placeholder="https://...ics" value={connectUrl} onChange={e=>setConnectUrl(e.target.value)} />
                       <button className="btn btn-primary" onClick={async ()=>{
                         if (!connectUrl) return;
-                        const res = await fetch('/api/sources', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ person_id: selectedPerson, provider: showConnect, url: connectUrl })});
+                        const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/sources`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ person_id: selectedPerson, provider: showConnect, url: connectUrl })});
                         const data = await res.json();
                         if (data?.source) setSources(prev => [data.source, ...prev]);
                         setShowConnect(null); setConnectUrl('');
@@ -759,8 +760,8 @@ export default function Home() {
                     </div>
                     <div className="text-[11px] opacity-60 mt-1">Tip: enable public sharing in your calendar/to-do app to obtain an ICS URL.</div>
                     <div className="mt-2 flex gap-2">
-                      <button className="btn btn-primary" onClick={()=> window.open(`/api/oauth/ms/start?provider=ms_graph_calendar&personId=${selectedPerson}`, '_blank', 'width=600,height=700') }>Connect Outlook Calendar (OAuth)</button>
-                      <button className="btn btn-primary" onClick={()=> window.open(`/api/oauth/ms/start?provider=ms_graph_todo&personId=${selectedPerson}`, '_blank', 'width=600,height=700') }>Connect Microsoft To Do (OAuth)</button>
+                      <button className="btn btn-primary" onClick={()=> window.open(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/oauth/ms/start?provider=ms_graph_calendar&personId=${selectedPerson}`, '_blank', 'width=600,height=700') }>Connect Outlook Calendar (OAuth)</button>
+                      <button className="btn btn-primary" onClick={()=> window.open(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/oauth/ms/start?provider=ms_graph_todo&personId=${selectedPerson}`, '_blank', 'width=600,height=700') }>Connect Microsoft To Do (OAuth)</button>
                     </div>
                   </div>
                 )}
@@ -770,7 +771,7 @@ export default function Home() {
                       <div key={s.id} className="flex items-center justify-between text-xs">
                         <span className="truncate">{s.provider.replace('_',' ')}: {s.url}</span>
                         <button className="btn btn-ghost" onClick={async ()=>{
-                          await fetch('/api/sources/sync', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ source_id: s.id })});
+                          await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/sources/sync`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ source_id: s.id })});
                           fetchAll();
                         }}>Sync now</button>
                       </div>
@@ -852,7 +853,7 @@ export default function Home() {
             onChangeTime={async (id, hhmm) => {
               // optimistic
               setTasks(prev => prev.map(t => t.id===id ? { ...t, due_time: hhmm } : t));
-              await fetch(`/api/tasks/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ due_time: hhmm }) });
+              await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/tasks/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ due_time: hhmm }) });
             }}
             isSelected={(id)=> selected.has(id)}
             onSelect={(id, e)=>{
@@ -884,7 +885,7 @@ export default function Home() {
               }));
               for (let i=0;i<ids.length;i++) {
                 const id = ids[i];
-                await fetch(`/api/tasks/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bucket_type: 'day', bucket_date: dateStr, sort: baseNext + i }) });
+                await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/tasks/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bucket_type: 'day', bucket_date: dateStr, sort: baseNext + i }) });
               }
             }}
             onReorderDay={onReorderDay}
@@ -943,7 +944,7 @@ export default function Home() {
         view={view}
         anchor={anchor}
         onSubmit={async (payload) => {
-          const res = await fetch('/api/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+          const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/tasks`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
           try {
             const data = await res.json();
             if (data?.task) setTasks(prev => prev.some(t=>t.id===data.task.id) ? prev : [data.task, ...prev]);
@@ -975,7 +976,7 @@ function TaskRow({ task, onToggle, onDelete, selected=false, onSelect, accentCol
   const saving = useRef(false);
   async function save() {
     saving.current = true;
-    await fetch(`/api/tasks/${task.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, due_date: due || null, due_time: dueTime || null, color, priority }) });
+    await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/tasks/${task.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, due_date: due || null, due_time: dueTime || null, color, priority }) });
     setEditing(false);
     saving.current = false;
   }
@@ -1273,7 +1274,7 @@ function PersonRow({ person, active, onSelect, progress, onUpdated, onDeleted, o
   const color = person.color || hashToHsl(person.id);
   async function remove() {
     if (!confirm('Delete person? Their tasks will be unassigned.')) return;
-    await fetch(`/api/people/${person.id}`, { method:'DELETE' });
+    await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/people/${person.id}`, { method:'DELETE' });
     onDeleted();
   }
   return (
@@ -1350,11 +1351,11 @@ function PersonModal({ person, onClose, onSaved }: { person: Person; onClose: ()
   const [editingSourceId, setEditingSourceId] = useState<number | null>(null);
   const [editingSourceUrl, setEditingSourceUrl] = useState<string>('');
   useEffect(() => {
-    fetch(`/api/sources?personId=${person.id}`).then(r=>r.json()).then(d=> setSources(d.sources||[])).catch(()=>setSources([]));
+    fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/sources?personId=${person.id}`).then(r=>r.json()).then(d=> setSources(d.sources||[])).catch(()=>setSources([]));
   }, [person.id]);
 
   async function save() {
-    const res = await fetch(`/api/people/${person.id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name, color })});
+    const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/people/${person.id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name, color })});
     const data = await res.json();
     if (data?.person) onSaved(data.person);
     onClose();
@@ -1381,8 +1382,8 @@ function PersonModal({ person, onClose, onSaved }: { person: Person; onClose: ()
               <button className="btn btn-ghost" onClick={()=>{ setShowConnect('apple_reminders'); setConnectUrl(''); }}>Apple Reminders (ICS)</button>
               <button className="btn btn-ghost" onClick={()=>{ setShowConnect('outlook_calendar'); setConnectUrl(''); }}>Outlook Calendar (ICS)</button>
               <button className="btn btn-ghost" onClick={()=>{ setShowConnect('microsoft_todo'); setConnectUrl(''); }}>Microsoft To Do (ICS)</button>
-              <button className="btn btn-primary" onClick={()=> window.open(`/api/oauth/ms/start?provider=ms_graph_calendar&personId=${person.id}`, '_blank', 'width=600,height=700') }>Connect Outlook Calendar (OAuth)</button>
-              <button className="btn btn-primary" onClick={()=> window.open(`/api/oauth/ms/start?provider=ms_graph_todo&personId=${person.id}`, '_blank', 'width=600,height=700') }>Connect Microsoft To Do (OAuth)</button>
+              <button className="btn btn-primary" onClick={()=> window.open(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/oauth/ms/start?provider=ms_graph_calendar&personId=${person.id}`, '_blank', 'width=600,height=700') }>Connect Outlook Calendar (OAuth)</button>
+              <button className="btn btn-primary" onClick={()=> window.open(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/oauth/ms/start?provider=ms_graph_todo&personId=${person.id}`, '_blank', 'width=600,height=700') }>Connect Microsoft To Do (OAuth)</button>
             </div>
             {showConnect && (
               <div className="popover mt-2">
@@ -1391,7 +1392,7 @@ function PersonModal({ person, onClose, onSaved }: { person: Person; onClose: ()
                   <input className="border rounded-md px-2 py-1 flex-1" placeholder="https://...ics" value={connectUrl} onChange={e=>setConnectUrl(e.target.value)} />
                   <button className="btn btn-primary" onClick={async ()=>{
                     if (!connectUrl) return;
-                    const res = await fetch('/api/sources', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ person_id: person.id, provider: showConnect, url: connectUrl })});
+                    const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/sources`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ person_id: person.id, provider: showConnect, url: connectUrl })});
                     const data = await res.json();
                     if (data?.source) setSources(prev => [data.source, ...prev]);
                     setShowConnect(null); setConnectUrl('');
@@ -1410,7 +1411,7 @@ function PersonModal({ person, onClose, onSaved }: { person: Person; onClose: ()
                       <>
                         <input className="border rounded-md px-2 py-0.5 text-xs flex-1" value={editingSourceUrl} onChange={e=>setEditingSourceUrl(e.target.value)} placeholder="https://...ics" />
                         <button className="btn btn-primary" onClick={async ()=>{
-                          const res = await fetch(`/api/sources/${s.id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ url: editingSourceUrl || null })});
+                          const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/sources/${s.id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ url: editingSourceUrl || null })});
                           const data = await res.json();
                           if (data?.source) setSources(prev => prev.map(x => x.id===s.id ? data.source : x));
                           setEditingSourceId(null); setEditingSourceUrl('');
@@ -1420,11 +1421,11 @@ function PersonModal({ person, onClose, onSaved }: { person: Person; onClose: ()
                     ) : (
                       <>
                         <button className="btn btn-ghost" onClick={async ()=>{
-                          await fetch('/api/sources/sync', { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ source_id: s.id })});
+                          await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/sources/sync`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ source_id: s.id })});
                         }}>Sync now</button>
                         <button className="btn btn-ghost" onClick={()=>{ setEditingSourceId(s.id); setEditingSourceUrl(s.url || ''); }}>Edit</button>
                         <button className="btn btn-ghost text-red-600" onClick={async ()=>{
-                          await fetch(`/api/sources/${s.id}`, { method:'DELETE' });
+                          await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/sources/${s.id}`, { method:'DELETE' });
                           setSources(prev => prev.filter(x => x.id !== s.id));
                         }}>Delete</button>
                       </>

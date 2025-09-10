@@ -1,6 +1,7 @@
 import { NextRequest } from 'next/server';
 import { getDb } from '@/lib/db';
 import { broadcast } from '@/lib/sse';
+import { corsHeaders, preflight } from '@/lib/cors';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -8,7 +9,7 @@ export const dynamic = 'force-dynamic';
 export async function GET() {
   const db = getDb();
   const people = db.prepare(`SELECT * FROM people ORDER BY name COLLATE NOCASE`).all();
-  return Response.json({ people });
+  return Response.json({ people }, { headers: corsHeaders() });
 }
 
 export async function POST(req: NextRequest) {
@@ -26,5 +27,9 @@ export async function POST(req: NextRequest) {
   const info = stmt.run(name, email, color);
   const person = db.prepare(`SELECT * FROM people WHERE id = ?`).get(info.lastInsertRowid as number);
   broadcast('people_updated', { type: 'created', person });
-  return Response.json({ person }, { status: 201 });
+  return Response.json({ person }, { status: 201, headers: corsHeaders() });
+}
+
+export async function OPTIONS() {
+  return preflight();
 }

@@ -1,5 +1,6 @@
 import { NextRequest } from 'next/server';
 import { getDb } from '@/lib/db';
+import { corsHeaders, preflight } from '@/lib/cors';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -11,7 +12,7 @@ export async function GET(req: NextRequest) {
   const rows = personId
     ? db.prepare(`SELECT * FROM external_sources WHERE person_id = ? ORDER BY created_at DESC`).all(Number(personId))
     : db.prepare(`SELECT * FROM external_sources ORDER BY created_at DESC`).all();
-  return Response.json({ sources: rows });
+  return Response.json({ sources: rows }, { headers: corsHeaders() });
 }
 
 export async function POST(req: NextRequest) {
@@ -24,6 +25,9 @@ export async function POST(req: NextRequest) {
   const stmt = db.prepare(`INSERT INTO external_sources (person_id, provider, url) VALUES (?, ?, ?)`);
   const info = stmt.run(person_id, provider, url);
   const source = db.prepare(`SELECT * FROM external_sources WHERE id = ?`).get(info.lastInsertRowid as number);
-  return Response.json({ source }, { status: 201 });
+  return Response.json({ source }, { status: 201, headers: corsHeaders() });
 }
 
+export async function OPTIONS() {
+  return preflight();
+}

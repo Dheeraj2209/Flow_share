@@ -1,17 +1,37 @@
 import { NextRequest } from 'next/server';
 import { getDb } from '@/lib/db';
 import ical from 'node-ical';
-import { ExternalSource } from '@/lib/db';
+import { corsHeaders, preflight } from '@/lib/cors';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
+type ICalEvent = { type?: string; summary?: string; start?: Date; uid?: string };
+type TaskImport = { title: string; due_date: string; due_time: string; external_id: string };
+type RowId = { id?: number };
+
+type DbExternalSource = {
+  id: number;
+  person_id: number;
+  provider: string;
+  url?: string | null;
+  access_token?: string | null;
+  refresh_token?: string | null;
+  expires_at?: number | null;
+  scope?: string | null;
+  account?: string | null;
+};
+
+type MsTodoLists = { value?: Array<{ id: string }>};
+type MsTodoItems = { value?: Array<{ id: string; title?: string; dueDateTime?: { dateTime?: string } }>};
+type MsEvents = { value?: Array<{ id: string; subject?: string; start?: { dateTime?: string } }>};
+
 async function importICS(url: string, person_id: number, source_id: number) {
   const db = getDb();
-  const data = await ical.async.fromURL(url);
-  const tasks: any[] = [];
+  const data = (await ical.async.fromURL(url)) as Record<string, ICalEvent>;
+  const tasks: TaskImport[] = [];
   for (const k in data) {
-    const ev: any = (data as any)[k];
+    const ev = data[k];
     if (ev.type !== 'VEVENT') continue;
     const title = String(ev.summary || 'Untitled').trim();
     const d = ev.start as Date | undefined;
@@ -28,7 +48,7 @@ async function importICS(url: string, person_id: number, source_id: number) {
   const select = db.prepare(`SELECT id FROM tasks WHERE source_id = ? AND external_id = ?`);
   const update = db.prepare(`UPDATE tasks SET title=?, due_date=?, due_time=?, bucket_type='day', bucket_date=? WHERE id = ?`);
   for (const t of tasks) {
-    const existing = select.get(source_id, t.external_id) as any;
+    const existing = select.get(source_id, t.external_id) as RowId | undefined;
     if (existing?.id) {
       update.run(t.title, t.due_date, t.due_time, t.due_date, existing.id);
     } else {
@@ -40,21 +60,23 @@ async function importICS(url: string, person_id: number, source_id: number) {
 
 export async function POST(req: NextRequest) {
   const db = getDb();
-  const body = await req.json().catch(()=>({} as any));
-  const source_id = body.source_id ? Number(body.source_id) : null;
+  let bodyUnknown: unknown;
+  try { bodyUnknown = await req.json(); } catch { bodyUnknown = {}; }
+  const source_idRaw = (bodyUnknown as { source_id?: unknown }).source_id;
+  const source_id = source_idRaw != null ? Number(source_idRaw) : null;
   if (!source_id) return new Response('source_id required', { status: 400 });
-  const src = db.prepare(`SELECT * FROM external_sources WHERE id = ?`).get(source_id) as ExternalSource & any;
+  const src = db.prepare(`SELECT * FROM external_sources WHERE id = ?`).get(source_id) as DbExternalSource | undefined;
   if (!src) return new Response('Source not found', { status: 404 });
-  let result: any = { imported: 0 };
+  let result: { imported: number } = { imported: 0 };
   if (src.provider === 'ms_graph_todo' || src.provider === 'ms_graph_calendar') {
     // Basic sync using stored access token; production should refresh when expired
     if (!src.access_token) return new Response('Not authorized', { status: 401 });
-    const headers = { Authorization: `Bearer ${src.access_token}` } as any;
+    const headers: HeadersInit = { Authorization: `Bearer ${src.access_token}` };
     if (src.provider === 'ms_graph_todo') {
-      const lists = await fetch('https://graph.microsoft.com/v1.0/me/todo/lists', { headers }).then(r=>r.json());
+      const lists: MsTodoLists = await fetch('https://graph.microsoft.com/v1.0/me/todo/lists', { headers }).then(r=>r.json());
       if (lists?.value?.length) {
         for (const list of lists.value) {
-          const items = await fetch(`https://graph.microsoft.com/v1.0/me/todo/lists/${list.id}/tasks`, { headers }).then(r=>r.json());
+          const items: MsTodoItems = await fetch(`https://graph.microsoft.com/v1.0/me/todo/lists/${list.id}/tasks`, { headers }).then(r=>r.json());
           if (items?.value?.length) {
             for (const it of items.value) {
               const title = it.title || 'Untitled';
@@ -63,9 +85,9 @@ export async function POST(req: NextRequest) {
               const due_time = d ? `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}` : null;
               const external_id = it.id;
               if (!due_date) continue;
-              const select = db.prepare(`SELECT id FROM tasks WHERE source_id=? AND external_id=?`).get(src.id, external_id) as any;
-              if (select?.id) {
-                db.prepare(`UPDATE tasks SET title=?, due_date=?, due_time=?, bucket_type='day', bucket_date=? WHERE id=?`).run(title, due_date, due_time, due_date, select.id);
+              const selectRow = db.prepare(`SELECT id FROM tasks WHERE source_id=? AND external_id=?`).get(src.id, external_id) as RowId | undefined;
+              if (selectRow?.id) {
+                db.prepare(`UPDATE tasks SET title=?, due_date=?, due_time=?, bucket_type='day', bucket_date=? WHERE id=?`).run(title, due_date, due_time, due_date, selectRow.id);
               } else {
                 db.prepare(`INSERT INTO tasks (title, person_id, status, due_date, due_time, bucket_type, bucket_date, recurrence, interval, sort, source_id, external_id)
                   VALUES (?, ?, 'todo', ?, ?, 'day', ?, 'none', 1, 0, ?, ?)`)
@@ -81,7 +103,7 @@ export async function POST(req: NextRequest) {
       const today = new Date();
       const start = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth()-1, 1));
       const end = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth()+2, 0));
-      const events = await fetch(`https://graph.microsoft.com/v1.0/me/calendarView?startDateTime=${start.toISOString()}&endDateTime=${end.toISOString()}`, { headers }).then(r=>r.json());
+      const events: MsEvents = await fetch(`https://graph.microsoft.com/v1.0/me/calendarView?startDateTime=${start.toISOString()}&endDateTime=${end.toISOString()}`, { headers }).then(r=>r.json());
       if (events?.value?.length) {
         for (const ev of events.value) {
           const title = ev.subject || 'Event';
@@ -90,9 +112,9 @@ export async function POST(req: NextRequest) {
           const due_date = d.toISOString().slice(0,10);
           const due_time = `${String(d.getHours()).padStart(2,'0')}:${String(d.getMinutes()).padStart(2,'0')}`;
           const external_id = ev.id;
-          const select = db.prepare(`SELECT id FROM tasks WHERE source_id=? AND external_id=?`).get(src.id, external_id) as any;
-          if (select?.id) {
-            db.prepare(`UPDATE tasks SET title=?, due_date=?, due_time=?, bucket_type='day', bucket_date=? WHERE id=?`).run(title, due_date, due_time, due_date, select.id);
+          const selectRow = db.prepare(`SELECT id FROM tasks WHERE source_id=? AND external_id=?`).get(src.id, external_id) as RowId | undefined;
+          if (selectRow?.id) {
+            db.prepare(`UPDATE tasks SET title=?, due_date=?, due_time=?, bucket_type='day', bucket_date=? WHERE id=?`).run(title, due_date, due_time, due_date, selectRow.id);
           } else {
             db.prepare(`INSERT INTO tasks (title, person_id, status, due_date, due_time, bucket_type, bucket_date, recurrence, interval, sort, source_id, external_id)
               VALUES (?, ?, 'todo', ?, ?, 'day', ?, 'none', 1, 0, ?, ?)`)
@@ -107,5 +129,9 @@ export async function POST(req: NextRequest) {
   } else {
     return new Response('No handler for provider', { status: 400 });
   }
-  return Response.json({ ok: true, result });
+  return Response.json({ ok: true, result }, { headers: corsHeaders() });
+}
+
+export async function OPTIONS() {
+  return preflight();
 }
