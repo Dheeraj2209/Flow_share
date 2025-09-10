@@ -30,6 +30,16 @@ jobs:
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
+      - name: Ensure API base URL is configured
+        run: |
+          if [ -z "${{ vars.NEXT_PUBLIC_API_BASE_URL }}" ] && [ -z "${{ secrets.NEXT_PUBLIC_API_BASE_URL }}" ]; then
+            echo "NEXT_PUBLIC_API_BASE_URL is not set as a Repository Variable or Secret." >&2
+            echo "Set it in Settings → Secrets and variables → Actions → Variables (preferred) or Secrets." >&2
+            exit 1
+          else
+            echo "NEXT_PUBLIC_API_BASE_URL is set."
+          fi
+
       - name: Install dependencies
         run: npm ci
 
@@ -41,7 +51,7 @@ jobs:
         env:
           NEXT_TELEMETRY_DISABLED: 1
           # Set this repository variable to your backend API base URL, e.g. https://flowshare.yourdomain.com
-          NEXT_PUBLIC_API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL }}
+          NEXT_PUBLIC_API_BASE_URL: ${{ vars.NEXT_PUBLIC_API_BASE_URL || secrets.NEXT_PUBLIC_API_BASE_URL }}
           STATIC_EXPORT: 1
           # Project site base path (adjust if repo name changes)
           BASE_PATH: /Flow_share
