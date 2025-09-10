@@ -5,6 +5,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { addDays, formatLocalYearMonth, startOfMonth, startOfWeek, dateKeyInZone } from '@/lib/date';
 
 export default function MiniCalendar({ value, onChange }: { value: Date; onChange: (d: Date) => void; }) {
+  console.log('MiniCalendar value:', value);
   const month = useMemo(() => new Date(value.getFullYear(), value.getMonth(), 1), [value]);
   const today = new Date();
   const start = startOfMonth(month);
