@@ -6,7 +6,7 @@ import { motion, AnimatePresence, Reorder, useDragControls } from "framer-motion
 import * as chrono from 'chrono-node';
 import { Calendar, Check, ChevronLeft, ChevronRight, ListPlus, Plus, Share2, UserPlus, Users, Repeat, Clock, Trash2, Pencil, User, ChevronDown, Hash, Settings2, GripVertical, BookOpen } from "lucide-react";
 // Swap MiniCalendar to DayPicker-based variant
-import MiniCalendar from '@/components/MiniCalendar';
+import MiniCalendar from '@/components/MiniCalendarDayPicker';
 import { Person, Task, ExternalSource, View, UserPrefs } from '@/types';
 import { startOfWeek, startOfMonth, formatISODate, formatLocalISODate, formatLocalYearMonth, addDays, minutesToHHMM, hhmmToMinutes, nextWeekday, parseDueDate as parseDueDateUtil, isOverdueDate, formatTimeLocal, formatDateLocal } from '@/lib/date';
 
@@ -719,7 +719,7 @@ function changeAnchor(delta: number) {
               {calendarOpen && (
                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2 }}>
                   <div className="mt-2">
-                    <MiniCalendar value={miniSelected ?? new Date()} onChange={(d)=> { if (d) { setMiniSelected(d); setAnchor(d); setView('day'); } else { setMiniSelected(null); } }} />
+                    <MiniCalendar value={miniSelected ?? new Date()} onChange={(d)=> { setMiniSelected(d); setAnchor(d); setView('day'); }} />
                   </div>
                 </motion.div>
               )}

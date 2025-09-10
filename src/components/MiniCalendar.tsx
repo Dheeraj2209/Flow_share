@@ -1,38 +1,42 @@
 "use client";
 
-import { DayPicker } from 'react-day-picker';
-import 'react-day-picker/dist/style.css';
+import { useMemo } from 'react';
+import { ChevronLeft, ChevronRight } from 'lucide-react';
+import { addDays, formatLocalYearMonth, startOfMonth, startOfWeek, dateKeyInZone } from '@/lib/date';
 
-export default function MiniCalendar({ value, onChange }: { value: Date; onChange: (d: Date | undefined) => void; }) {
+export default function MiniCalendar({ value, onChange }: { value: Date; onChange: (d: Date) => void; }) {
+  const month = useMemo(() => new Date(value.getFullYear(), value.getMonth(), 1), [value]);
+  const today = new Date();
+  const start = startOfMonth(month);
+  const startGrid = startOfWeek(new Date(start.getFullYear(), start.getMonth(), 1));
+  const cells: Date[] = [];
+  for (let i=0;i<42;i++) cells.push(addDays(startGrid, i));
+  const isSameDay = (a: Date, b: Date) => a.getFullYear()===b.getFullYear() && a.getMonth()===b.getMonth() && a.getDate()===b.getDate();
+  const sameMonth = (d: Date) => d.getMonth() === month.getMonth() && d.getFullYear() === month.getFullYear();
+
   return (
-    <div className="card p-0">
-      <DayPicker
-        mode="single"
-        selected={value}
-        onSelect={onChange}
-        showOutsideDays
-        className="p-2"
-        classNames={{
-          months: "flex flex-col sm:flex-row space-y-4 sm:space-x-4 sm:space-y-0",
-          month: "space-y-4",
-          caption: "flex justify-center pt-1 relative items-center",
-          caption_label: "text-sm font-medium",
-          nav: "space-x-1 flex items-center",
-          nav_button: "h-7 w-7 bg-transparent p-0 opacity-50 hover:opacity-100",
-          table: "w-full border-collapse space-y-1",
-          head_row: "flex",
-          head_cell: "text-muted-foreground rounded-md w-9 font-normal text-[0.8rem]",
-          row: "flex w-full mt-2",
-          cell: "h-9 w-9 text-center text-sm p-0 relative [&:has([aria-selected].day-range-end)]:rounded-r-md [&:has([aria-selected].day-outside)]:bg-accent/50 [&:has([aria-selected])]:bg-accent first:[&:has([aria-selected])]:rounded-l-md last:[&:has([aria-selected])]:rounded-r-md focus-within:relative focus-within:z-20",
-          day: "h-9 w-9 p-0 font-normal aria-selected:opacity-100",
-          day_range_end: "day-range-end",
-          day_selected: "bg-primary text-primary-foreground hover:bg-primary hover:text-primary-foreground focus:bg-primary focus:text-primary-foreground",
-          day_today: "bg-accent text-accent-foreground",
-          day_outside: "day-outside text-muted-foreground opacity-50",
-          day_disabled: "text-muted-foreground opacity-50",
-          day_hidden: "invisible",
-        }}
-      />
+    <div className="card p-3">
+      <div className="flex items-center justify-between mb-2">
+        <button className="btn btn-ghost" onClick={() => onChange(new Date(month.getFullYear(), month.getMonth()-1, value.getDate()))}><ChevronLeft size={14}/></button>
+        <div className="text-sm font-medium">{formatLocalYearMonth(month)}</div>
+        <button className="btn btn-ghost" onClick={() => onChange(new Date(month.getFullYear(), month.getMonth()+1, value.getDate()))}><ChevronRight size={14}/></button>
+      </div>
+      <div className="grid grid-cols-7 text-[11px] opacity-60 mb-1">
+        {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map(d => <div key={d} className="text-center">{d}</div>)}
+      </div>
+      <div className="grid grid-cols-7 gap-1">
+        {cells.map((d,i) => {
+          // Shade only the client's current date in the client's timezone
+          const todayKey = dateKeyInZone(today);
+          const cellKey = dateKeyInZone(d);
+          const active = cellKey === todayKey;
+          return (
+            <button key={i} onClick={() => onChange(d)} className={`aspect-square rounded-md text-[12px] grid place-items-center border transition-colors ${active ? 'bg-white text-black' : sameMonth(d) ? 'hover:bg-black/5 dark:hover:bg-white/10' : 'opacity-40 hover:opacity-60 hover:bg-black/5 dark:hover:bg-white/10'}`}>
+              <span>{d.getDate()}</span>
+            </button>
+          );
+        })}
+      </div>
     </div>
   );
 }
