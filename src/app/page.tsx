@@ -952,8 +952,9 @@ export default function Home() {
                   <Reorder.Group as="div" axis="y" values={items} onReorder={(reordered) => onReorderDay(date, reordered)}>
                      <AnimatePresence initial={false}>
                        {items.map(task => (
-                    <Reorder.Item as="div" key={task.id} value={task} transition={{type:'spring', stiffness:400, damping:30}}>
-                          <TaskRow task={task} selected={selected.has(task.id)} accentColor={accentFor(task)} prefs={prefs} onSelect={(id,e)=>{
+                    <ReorderableRow key={task.id} value={task}>
+                      {(start)=> (
+                        <TaskRow task={task} selected={selected.has(task.id)} accentColor={accentFor(task)} prefs={prefs} onSelect={(id,e)=>{
                             setSelected(prev => {
                               const next = new Set(prev);
                               if (e.shiftKey || e.ctrlKey || e.metaKey) {
@@ -962,8 +963,9 @@ export default function Home() {
                               return next;
                             });
                           }} onToggle={() => toggleDone(task)} onDelete={() => deleteTask(task)} personName={personById.get(task.person_id || -1)?.name}
-                          personColor={personById.get(task.person_id || -1)?.color || personColorMap.get(task.person_id || -1)} />
-                        </Reorder.Item>
+                          personColor={personById.get(task.person_id || -1)?.color || personColorMap.get(task.person_id || -1)} onReorderHandleDown={start} />
+                      )}
+                    </ReorderableRow>
                       ))}
                     </AnimatePresence>
                   </Reorder.Group>
@@ -1000,7 +1002,7 @@ export default function Home() {
   );
 }
 
-function TaskRow({ task, onToggle, onDelete, selected=false, onSelect, accentColor, personName, personColor, prefs }: { task: Task; onToggle: () => void; onDelete: () => void; selected?: boolean; onSelect?: (id:number, e: React.MouseEvent)=>void; accentColor?: string; personName?: string; personColor?: string; prefs: UserPrefs; }) {
+function TaskRow({ task, onToggle, onDelete, selected=false, onSelect, accentColor, personName, personColor, prefs, onReorderHandleDown }: { task: Task; onToggle: () => void; onDelete: () => void; selected?: boolean; onSelect?: (id:number, e: React.MouseEvent)=>void; accentColor?: string; personName?: string; personColor?: string; prefs: UserPrefs; onReorderHandleDown?: (e:any)=>void; }) {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(task.title);
   const [due, setDue] = useState(task.due_date || '');
@@ -1022,6 +1024,10 @@ function TaskRow({ task, onToggle, onDelete, selected=false, onSelect, accentCol
       style={{boxShadow: `inset 0 0 0 2px ${accentAlpha}`}}
       onMouseDown={(e)=> onSelect?.(task.id, e)}
     >
+      <span className="cursor-grab active:cursor-grabbing opacity-60 hover:opacity-100" title="Reorder"
+        onPointerDown={(e)=>{ e.stopPropagation(); onReorderHandleDown?.(e); }}>
+        <GripVertical size={14} />
+      </span>
       <button onClick={onToggle} className={`size-5 rounded grid place-items-center border transition-colors ${task.status==='done' ? 'bg-emerald-500 text-white border-emerald-600' : 'hover:bg-black/5 dark:hover:bg-white/10'}`} title="Toggle done">
         {task.status==='done' ? <Check size={14}/> : null}
       </button>
@@ -1279,6 +1285,25 @@ function ReorderableChip({ task, children, value }: { task: Task; children: (sta
   );
 }
 
+function ReorderableRow({ value, children }: { value: Task; children: (start:(e:any)=>void)=>React.ReactNode; }) {
+  const controls = useDragControls();
+  // On touch devices, require a longer press before starting drag to avoid scroll conflicts.
+  const startWithDelay = (downEvent: any) => {
+    const isTouch = (downEvent?.pointerType === 'touch') || ('ontouchstart' in window);
+    if (!isTouch) return controls.start(downEvent);
+    let started = false;
+    const timer = setTimeout(() => { started = true; controls.start(downEvent); }, 180);
+    const clear = () => { if (!started) clearTimeout(timer); window.removeEventListener('pointerup', clear, { capture: true } as any); window.removeEventListener('pointercancel', clear, { capture: true } as any); };
+    window.addEventListener('pointerup', clear, { capture: true } as any);
+    window.addEventListener('pointercancel', clear, { capture: true } as any);
+  };
+  return (
+    <Reorder.Item as="div" value={value} dragListener={false} dragControls={controls}>
+      {children(startWithDelay)}
+    </Reorder.Item>
+  );
+}
+
 function ColorDots({ value, onChange }: { value: string | null; onChange: (v: string | null) => void; }) {
   const palette = ['#ef4444','#f97316','#eab308','#22c55e','#06b6d4','#3b82f6','#8b5cf6','#ec4899'];
   return (
@@ -1336,6 +1361,10 @@ function DayTimeline({ date, items, onChangeTime, isSelected, onSelect, accentFo
   const dateKey = formatISODate(date);
   const toY = (t?: string | null) => t ? (hhmmToMinutes(t) / 60) * hourHeight : 9 * hourHeight; // default 9:00
   const clampY = (y:number) => Math.max(0, Math.min(totalH - 1, y));
+  const [coarse, setCoarse] = useState(false);
+  useEffect(() => {
+    try { setCoarse(window.matchMedia && window.matchMedia('(pointer: coarse)').matches); } catch {}
+  }, []);
   return (
     <div className="card p-0 overflow-hidden">
       <div className="relative" style={{ height: totalH }}>
@@ -1352,27 +1381,54 @@ function DayTimeline({ date, items, onChangeTime, isSelected, onSelect, accentFo
           const initialY = toY(t.due_time);
           const left = 8 + (i % 3) * 6; // tiny fan to reduce overlap
           return (
-            <motion.div key={t.id} drag="y" dragConstraints={{ top: 0, bottom: totalH-1 }}
-              initial={false}
-              className={`absolute right-2 rounded-md border px-2 py-1 text-[12px] bg-white/70 dark:bg-black/40 backdrop-blur-sm ${isSelected(t.id)?'ring-2 ring-black/40 dark:ring-white/40':''}`}
-              style={{ top: initialY, left, borderColor: accent }}
-              onMouseDown={(e)=> onSelect(t.id, e)}
-              onDragEnd={(_, info)=>{
-                const y = clampY(info.point.y);
-                const mins = Math.round((y / hourHeight) * 60 / 5) * 5; // 5-min steps
+            <TimelineDraggableItem key={t.id} y={initialY} left={left} color={accent} selected={isSelected(t.id)} coarse={coarse}
+              onSelect={(e)=> onSelect(t.id, e)}
+              onEnd={(y)=>{
+                const cy = clampY(y);
+                const mins = Math.round((cy / hourHeight) * 60 / 5) * 5; // 5-min steps
                 onChangeTime(t.id, minutesToHHMM(mins));
               }}
-            >
-              <div className="flex items-center gap-2">
-                <span className="size-2 rounded-full" style={{background: accent}}></span>
-                <span className={`truncate ${t.status==='done' ? 'line-through opacity-60':''}`}>{t.title}</span>
-                <span className="ml-auto text-[10px] opacity-60">{t.due_time || '—'}</span>
-              </div>
-            </motion.div>
+              title={t.title}
+              time={t.due_time || '—'}
+            />
           );
         })}
       </div>
     </div>
+  );
+}
+
+function TimelineDraggableItem({ y, left, color, selected, onSelect, onEnd, title, time, coarse }:{ y:number; left:number; color:string; selected:boolean; onSelect:(e:any)=>void; onEnd:(y:number)=>void; title:string; time:string; coarse:boolean; }){
+  const controls = useDragControls();
+  const start = (e:any)=> controls.start(e);
+  const handlePointerDown = (e:any)=>{
+    e.stopPropagation();
+    const isTouch = (e?.pointerType === 'touch') || ('ontouchstart' in window);
+    if (!isTouch) return start(e);
+    // long-press on touch
+    let started = false;
+    const timer = setTimeout(()=> { started = true; start(e); }, 200);
+    const clear = ()=>{ if(!started) clearTimeout(timer); window.removeEventListener('pointerup', clear, {capture:true} as any); window.removeEventListener('pointercancel', clear, {capture:true} as any); };
+    window.addEventListener('pointerup', clear, {capture:true} as any);
+    window.addEventListener('pointercancel', clear, {capture:true} as any);
+  };
+  return (
+    <motion.div drag={coarse ? false : 'y'} dragControls={controls} dragListener={false} dragConstraints={{ top: 0, bottom: Infinity }}
+      initial={false}
+      className={`absolute right-2 rounded-md border px-2 py-1 text-[12px] bg-white/70 dark:bg-black/40 backdrop-blur-sm ${selected?'ring-2 ring-black/40 dark:ring-white/40':''}`}
+      style={{ top: y, left, borderColor: color, touchAction: 'pan-y' as any }}
+      onMouseDown={onSelect}
+      onDragEnd={(_, info)=> onEnd(info.point.y)}
+    >
+      <div className="flex items-center gap-2">
+        <span className="cursor-grab active:cursor-grabbing opacity-60 hover:opacity-100" onPointerDown={handlePointerDown} title="Drag">
+          <GripVertical size={12} />
+        </span>
+        <span className="size-2 rounded-full" style={{background: color}}></span>
+        <span className={`truncate ${selected ? '' : ''} ${/* preserve done styling externally if desired */''}`}>{title}</span>
+        <span className="ml-auto text-[10px] opacity-60">{time}</span>
+      </div>
+    </motion.div>
   );
 }
 
