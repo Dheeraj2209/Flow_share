@@ -15,7 +15,8 @@ export async function GET(req: NextRequest) {
   if (personId) { where.push('person_id = ?'); params.push(Number(personId)); }
   const sql = `SELECT * FROM tasks ${where.length ? 'WHERE ' + where.join(' AND ') : ''} ORDER BY created_at DESC`;
   const tasks = db.prepare(sql).all(...params);
-  return Response.json({ tasks }, { headers: corsHeaders() });
+  const doneDates = db.prepare(`SELECT task_id, date FROM task_done_dates`).all();
+  return Response.json({ tasks, doneDates }, { headers: corsHeaders() });
 }
 
 export async function POST(req: NextRequest) {

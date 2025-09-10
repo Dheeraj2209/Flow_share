@@ -300,6 +300,7 @@ function expandTaskInstances(task: Task, view: View, anchor: Date) {
 export default function Home() {
   const [people, setPeople] = useState<Person[]>([]);
   const [tasks, setTasks] = useState<Task[]>([]);
+  const [doneByDate, setDoneByDate] = useState<Map<string, Set<number>>>(new Map());
   const [selectedPerson, setSelectedPerson] = useState<number | null>(null);
   const [view, setView] = useState<View>("week");
   const [layout, setLayout] = useState<'list'|'grid'|'timeline'>('list');
@@ -397,6 +398,16 @@ export default function Home() {
       ]);
       setPeople(pRes.people || []);
       setTasks(tRes.tasks || []);
+      const map = new Map<string, Set<number>>();
+      if (Array.isArray(tRes.doneDates)) {
+        for (const row of tRes.doneDates) {
+          const date = String(row.date);
+          const tid = Number(row.task_id);
+          if (!map.has(date)) map.set(date, new Set());
+          map.get(date)!.add(tid);
+        }
+      }
+      setDoneByDate(map);
     } catch (e: any) {
       setError(e?.message || 'Failed to load');
     } finally {
@@ -537,7 +548,9 @@ export default function Home() {
       arr.sort((a, b) => {
         const sa = a.sort ?? 0, sb = b.sort ?? 0;
         if (sa !== sb) return sa - sb;
-        if (a.status !== b.status) return a.status > b.status ? 1 : -1;
+        const aStatus = (a.recurrence !== 'none' && (doneByDate.get(k)?.has(a.id))) ? 'done' : a.status;
+        const bStatus = (b.recurrence !== 'none' && (doneByDate.get(k)?.has(b.id))) ? 'done' : b.status;
+        if (aStatus !== bStatus) return aStatus > bStatus ? 1 : -1;
         return a.title.localeCompare(b.title);
       });
     }
@@ -546,7 +559,7 @@ export default function Home() {
       end,
       days: Array.from(map.entries()).sort((a,b) => a[0].localeCompare(b[0]))
     };
-  }, [tasks, selectedPerson, view, anchor, refresh.current]);
+  }, [tasks, selectedPerson, view, anchor, refresh.current, doneByDate]);
 
   const personColorMap = useMemo(() => {
     const m = new Map<number, string>();
@@ -598,12 +611,30 @@ export default function Home() {
 
   // task creation moved to the bottom Composer
 
-  async function toggleDone(task: Task) {
+  async function toggleDone(task: Task, dateKey?: string) {
+    if (task.recurrence !== 'none' && dateKey) {
+      // toggle per-instance for the given date
+      const isDone = doneByDate.get(dateKey)?.has(task.id) || false;
+      // optimistic update of doneByDate
+      setDoneByDate(prev => {
+        const m = new Map(prev);
+        if (!m.has(dateKey)) m.set(dateKey, new Set());
+        const set = new Set(m.get(dateKey));
+        if (isDone) set.delete(task.id); else set.add(task.id);
+        m.set(dateKey, set);
+        return m;
+      });
+      try {
+        await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/tasks/${task.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ done_on: dateKey, done: !isDone }) });
+      } catch {
+        fetchAll();
+      }
+      return;
+    }
+    // non-recurring: toggle whole task status
     const status = task.status === 'done' ? 'todo' : 'done';
-    // optimistic update
     setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status } : t));
     fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/tasks/${task.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }).catch(()=>{
-      // fallback re-fetch if needed
       fetchAll();
     });
   }
@@ -952,22 +983,27 @@ export default function Home() {
                   <Reorder.Group as="div" axis="y" values={items} onReorder={(reordered) => onReorderDay(date, reordered)}>
                      <AnimatePresence initial={false}>
                        {items.map(task => (
-                    <ReorderableRow key={task.id} value={task}>
-                      {(start)=> (
-                        <TaskRow task={task} selected={selected.has(task.id)} accentColor={accentFor(task)} prefs={prefs} onSelect={(id,e)=>{
-                            setSelected(prev => {
-                              const next = new Set(prev);
-                              if (e.shiftKey || e.ctrlKey || e.metaKey) {
-                                if (next.has(id)) next.delete(id); else next.add(id);
-                              } else { next.clear(); next.add(id); }
-                              return next;
-                            });
-                          }} onToggle={() => toggleDone(task)} onDelete={() => deleteTask(task)} personName={personById.get(task.person_id || -1)?.name}
-                          personColor={personById.get(task.person_id || -1)?.color || personColorMap.get(task.person_id || -1)} onReorderHandleDown={start} />
-                      )}
-                    </ReorderableRow>
-                      ))}
-                    </AnimatePresence>
+                         <ReorderableRow key={task.id} value={task}>
+                           {(start)=> (
+                        <TaskRow task={task} selected={selected.has(task.id)} accentColor={accentFor(task)} prefs={prefs}
+                          onSelect={(id,e)=>{
+                              setSelected(prev => {
+                                const next = new Set(prev);
+                                if (e.shiftKey || e.ctrlKey || e.metaKey) {
+                                  if (next.has(id)) next.delete(id); else next.add(id);
+                                } else { next.clear(); next.add(id); }
+                                return next;
+                              });
+                          }} onToggle={() => toggleDone(task, date)} onDelete={() => deleteTask(task)}
+                          personName={personById.get(task.person_id || -1)?.name}
+                          personColor={personById.get(task.person_id || -1)?.color || personColorMap.get(task.person_id || -1)}
+                          onReorderHandleDown={start}
+                          instanceDone={task.recurrence !== 'none' ? (doneByDate.get(date)?.has(task.id) || false) : (task.status==='done')}
+                        />
+                            )}
+                          </ReorderableRow>
+                        ))}
+                      </AnimatePresence>
                   </Reorder.Group>
                 </motion.section>
               ))}
@@ -1002,7 +1038,7 @@ export default function Home() {
   );
 }
 
-function TaskRow({ task, onToggle, onDelete, selected=false, onSelect, accentColor, personName, personColor, prefs, onReorderHandleDown }: { task: Task; onToggle: () => void; onDelete: () => void; selected?: boolean; onSelect?: (id:number, e: React.MouseEvent)=>void; accentColor?: string; personName?: string; personColor?: string; prefs: UserPrefs; onReorderHandleDown?: (e:any)=>void; }) {
+function TaskRow({ task, onToggle, onDelete, selected=false, onSelect, accentColor, personName, personColor, prefs, onReorderHandleDown, instanceDone }: { task: Task; onToggle: () => void; onDelete: () => void; selected?: boolean; onSelect?: (id:number, e: React.MouseEvent)=>void; accentColor?: string; personName?: string; personColor?: string; prefs: UserPrefs; onReorderHandleDown?: (e:any)=>void; instanceDone?: boolean; }) {
   const [editing, setEditing] = useState(false);
   const [title, setTitle] = useState(task.title);
   const [due, setDue] = useState(task.due_date || '');
@@ -1018,6 +1054,7 @@ function TaskRow({ task, onToggle, onDelete, selected=false, onSelect, accentCol
   }
   const accent = accentColor || (color || task.color) || hashToHsl(task.person_id ?? task.id);
   const accentAlpha = withAlpha(accent, 0.3);
+  const isDone = instanceDone ?? (task.status === 'done');
   return (
     <motion.div layout initial={{opacity:0, scale:0.98}} animate={{opacity:1, scale:1}} exit={{opacity:0, scale:0.98}} transition={{type:'spring', stiffness:300, damping:24}}
       className={`card p-3 flex items-center gap-3 ${selected ? 'ring-2 ring-black/40 dark:ring-white/40' : ''}`}
@@ -1028,13 +1065,13 @@ function TaskRow({ task, onToggle, onDelete, selected=false, onSelect, accentCol
         onPointerDown={(e)=>{ e.stopPropagation(); onReorderHandleDown?.(e); }}>
         <GripVertical size={14} />
       </span>
-      <button onClick={onToggle} className={`size-5 rounded grid place-items-center border transition-colors ${task.status==='done' ? 'bg-emerald-500 text-white border-emerald-600' : 'hover:bg-black/5 dark:hover:bg-white/10'}`} title="Toggle done">
-        {task.status==='done' ? <Check size={14}/> : null}
+      <button onClick={onToggle} className={`size-5 rounded grid place-items-center border transition-colors ${isDone ? 'bg-emerald-500 text-white border-emerald-600' : 'hover:bg-black/5 dark:hover:bg-white/10'}`} title="Toggle done">
+        {isDone ? <Check size={14}/> : null}
       </button>
       <div className="flex-1 min-w-0">
         {!editing ? (
           <div>
-            <div className={`font-medium truncate ${task.status === 'done' ? 'line-through opacity-60' : ''}`}>{task.title}</div>
+            <div className={`font-medium truncate ${isDone ? 'line-through opacity-60' : ''}`}>{task.title}</div>
             <div className="text-xs opacity-70 flex gap-3 items-center flex-wrap">
               {task.due_date && (
                 <span className={`chip flex items-center gap-1 ${isOverdue(task) ? 'bg-rose-500/15 text-rose-700 border-rose-600/30' : ''}`}>
@@ -1042,7 +1079,7 @@ function TaskRow({ task, onToggle, onDelete, selected=false, onSelect, accentCol
                   {isOverdue(task) && <span className="ml-1">Overdue</span>}
                 </span>
               )}
-              <span className={`chip border ${statusColor(task.status)}`}>{task.status.replace('_',' ')}</span>
+              <span className={`chip border ${statusColor(isDone ? 'done' : task.status)}`}>{(isDone ? 'done' : task.status).replace('_',' ')}</span>
               {task.recurrence !== 'none' && <span className="chip flex items-center gap-1"><Repeat size={12}/> {task.recurrence}</span>}
               {typeof task.priority === 'number' && task.priority > 0 && (
                 <span className={`chip ${priorityClass(task.priority)}`}>{['','Low','Med','High'][task.priority]}</span>
@@ -1545,6 +1582,8 @@ function Composer({ people, view, anchor, onSubmit, currentPerson, leftOffset, o
   const [scope, setScope] = useState<View>(view);
   const [color, setColor] = useState<string | null>(null);
   const [priority, setPriority] = useState<number>(0);
+  const [endMode, setEndMode] = useState<'none'|'on_date'>('none');
+  const [untilDate, setUntilDate] = useState<string>('');
   const [moreOpen, setMoreOpen] = useState(false);
   const [assignOpen, setAssignOpen] = useState(false);
   const [dateOpen, setDateOpen] = useState(false);
@@ -1595,9 +1634,12 @@ function Composer({ people, view, anchor, onSubmit, currentPerson, leftOffset, o
         : formatISODate(startOfMonth(anchor));
     }
     if (color || parsed.color) payload.color = color || parsed.color;
+    if (recurrence !== 'none') {
+      payload.until = endMode === 'on_date' && untilDate ? untilDate : null;
+    }
     if (priority || parsed.priority) payload.priority = priority || parsed.priority;
     await onSubmit(payload);
-    setTitle(""); setDue(""); setDueTime(""); setByweekday([]); setColor(null); setPriority(0);
+    setTitle(""); setDue(""); setDueTime(""); setByweekday([]); setColor(null); setPriority(0); setEndMode('none'); setUntilDate('');
     setAssignOpen(false); setDateOpen(false); setMoreOpen(false);
   };
 
@@ -1736,6 +1778,20 @@ function Composer({ people, view, anchor, onSubmit, currentPerson, leftOffset, o
                       <button key={i} className={`px-2 py-1 rounded-md border text-xs ${active? 'bg-black text-white dark:bg-white dark:text-black':''}`} onClick={()=> setByweekday(prev => active ? prev.filter(x=>x!==i) : [...prev, i])}>{d}</button>
                     );
                   })}
+                </div>
+              )}
+              {recurrence!=='none' && (
+                <div className="flex items-center gap-3 flex-wrap">
+                  <span className="text-xs opacity-70">Ends</span>
+                  <label className="text-xs inline-flex items-center gap-1">
+                    <input type="radio" name="end" checked={endMode==='none'} onChange={()=> setEndMode('none')} /> No end
+                  </label>
+                  <label className="text-xs inline-flex items-center gap-1">
+                    <input type="radio" name="end" checked={endMode==='on_date'} onChange={()=> setEndMode('on_date')} /> On date
+                  </label>
+                  {endMode==='on_date' && (
+                    <input type="date" value={untilDate} onChange={e=> setUntilDate(e.target.value)} className="border rounded-md px-2 py-1" />
+                  )}
                 </div>
               )}
             </motion.div>

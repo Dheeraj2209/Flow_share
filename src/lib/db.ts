@@ -93,6 +93,16 @@ function migrate(db: Database.Database) {
     )
   `).run();
 
+  // per-instance completion for recurring tasks
+  db.prepare(`
+    CREATE TABLE IF NOT EXISTS task_done_dates (
+      task_id INTEGER NOT NULL,
+      date TEXT NOT NULL,
+      PRIMARY KEY (task_id, date),
+      FOREIGN KEY (task_id) REFERENCES tasks(id) ON DELETE CASCADE
+    )
+  `).run();
+
   // Backfill migrations for older DBs
   try {
     const cols = db.prepare(`PRAGMA table_info(tasks)`).all() as { name: string }[];

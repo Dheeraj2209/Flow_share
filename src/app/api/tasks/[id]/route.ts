@@ -17,8 +17,21 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   const db = getDb();
   const id = Number(params.id);
   const existing = db.prepare(`SELECT * FROM tasks WHERE id = ?`).get(id);
-  if (!existing) return new Response('Not found', { status: 404 });
+  if (!existing) return new Response('Not found', { status: 404, headers: corsHeaders() });
   const body = await req.json().catch(() => ({} as any));
+
+  if (body.done_on) {
+    const done_on = String(body.done_on);
+    const done = body.done === false ? false : true;
+    if (done) {
+      db.prepare(`INSERT OR IGNORE INTO task_done_dates (task_id, date) VALUES (?, ?)`)
+        .run(id, done_on);
+    } else {
+      db.prepare(`DELETE FROM task_done_dates WHERE task_id = ? AND date = ?`).run(id, done_on);
+    }
+    broadcast('task_updated', { task_id: id, done_on, done });
+    return Response.json({ ok: true, task_id: id, done_on, done }, { headers: corsHeaders() });
+  }
   const fields: string[] = [];
   const values: any[] = [];
   const updatable = ['title','description','person_id','status','due_date','due_time','bucket_type','bucket_date','recurrence','interval','byweekday','until','sort','color','priority'] as const;
@@ -52,7 +65,7 @@ export async function DELETE(_: NextRequest, { params }: { params: { id: string 
   const db = getDb();
   const id = Number(params.id);
   const task = db.prepare(`SELECT * FROM tasks WHERE id = ?`).get(id);
-  if (!task) return new Response('Not found', { status: 404 });
+  if (!task) return new Response('Not found', { status: 404, headers: corsHeaders() });
   db.prepare(`DELETE FROM tasks WHERE id = ?`).run(id);
   broadcast('task_deleted', { id });
   return new Response(null, { status: 204, headers: corsHeaders() });
