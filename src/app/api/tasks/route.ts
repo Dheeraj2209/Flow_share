@@ -39,8 +39,8 @@ export async function POST(req: NextRequest) {
   const priority = body.priority != null ? Math.max(0, Math.min(3, Number(body.priority))) : 0;
   // sort ordering for day buckets
   let sort = 0;
-  if (bucket_type === 'day' && bucket_date) {
-    const row = await db.get(`SELECT COALESCE(MAX(sort), -1) + 1 AS next FROM tasks WHERE bucket_type='day' AND bucket_date=?`, [bucket_date]) as any;
+  if ((bucket_type === 'day' || bucket_type === 'week' || bucket_type === 'month') && bucket_date) {
+    const row = await db.get(`SELECT COALESCE(MAX(sort), -1) + 1 AS next FROM tasks WHERE bucket_type=? AND bucket_date=?`, [bucket_type, bucket_date]) as any;
     sort = row?.next ?? 0;
   }
 

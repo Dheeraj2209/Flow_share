@@ -63,6 +63,20 @@ function formatISODate(d: Date) {
   return d.toISOString().slice(0, 10);
 }
 
+// Local date helpers for display (avoid UTC shifting in labels)
+function formatLocalISODate(d: Date) {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  const dd = String(d.getDate()).padStart(2, '0');
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function formatLocalYearMonth(d: Date) {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, '0');
+  return `${yyyy}-${mm}`;
+}
+
 function addDays(d: Date, n: number) {
   const x = new Date(d);
   x.setUTCDate(x.getUTCDate() + n);
@@ -401,15 +415,16 @@ export default function Home() {
 
   const anchorLabel = useMemo(() => {
     const d = anchor;
-    if (view === "day") return d.toISOString().slice(0, 10);
+    if (view === "day") return formatLocalISODate(d);
     if (view === "week") {
       const s = startOfWeek(d);
       const e = addDays(s, 6);
-      return `${s.toISOString().slice(0, 10)} → ${e.toISOString().slice(0, 10)}`;
+      // Display as local dates to avoid UTC offset confusion
+      return `${formatLocalISODate(s)} → ${formatLocalISODate(e)}`;
     }
     const s = startOfMonth(d);
     const e = new Date(Date.UTC(s.getUTCFullYear(), s.getUTCMonth() + 1, 0));
-    return `${s.toISOString().slice(0, 10)} (${e.getUTCDate()} days)`;
+    return `${formatLocalISODate(s)} (${e.getUTCDate()} days)`;
   }, [anchor, view]);
 
   const refresh = useRef(0);
@@ -728,6 +743,24 @@ export default function Home() {
       await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/tasks/${u.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sort: u.sort }) });
     }
   }
+  async function onReorderPeriod(periodKey: string, reorderedIds: number[]) {
+    const periodTasks = tasks.filter(t => (t.bucket_type === view) && t.bucket_date === periodKey);
+    const setIds = new Set(reorderedIds);
+    const filtered = reorderedIds.filter(id => periodTasks.some(t => t.id === id));
+    const updates: { id: number; sort: number }[] = [];
+    let idx = 0;
+    for (const id of filtered) {
+      const t = periodTasks.find(x => x.id === id);
+      if (!t) continue;
+      const current = t.sort ?? 0;
+      if (current !== idx) updates.push({ id, sort: idx });
+      idx++;
+    }
+    setTasks(prev => prev.map(t => (setIds.has(t.id) && t.bucket_type===view && t.bucket_date===periodKey) ? { ...t, sort: (updates.find(u=>u.id===t.id)?.sort ?? (t.sort||0)) } : t));
+    for (const u of updates) {
+      await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/tasks/${u.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sort: u.sort }) });
+    }
+  }
 
   function changeAnchor(delta: number) {
     if (view === 'day') setAnchor(addDays(anchor, delta));
@@ -1013,6 +1046,9 @@ export default function Home() {
               }
             }}
             onReorderDay={onReorderDay}
+            onReorderPeriod={async (periodKey, ids)=>{
+              await onReorderPeriod(periodKey, ids);
+            }}
             isSelected={(id)=> selected.has(id)}
             onSelect={(id, e)=>{
               setSelected(prev => {
@@ -1029,6 +1065,7 @@ export default function Home() {
             personById={personById}
             personColorMap={personColorMap}
             prefs={prefs}
+            sortMode={sortMode}
           />
         ) : (
           <div className="space-y-8">
@@ -1241,7 +1278,7 @@ function MiniCalendar({ value, onChange }: { value: Date; onChange: (d: Date) =>
     <div className="card p-3">
       <div className="flex items-center justify-between mb-2">
         <button className="btn btn-ghost" onClick={() => setMonth(new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth()-1, 1)))}><ChevronLeft size={14}/></button>
-        <div className="text-sm font-medium">{month.toISOString().slice(0,7)}</div>
+        <div className="text-sm font-medium">{formatLocalYearMonth(month)}</div>
         <button className="btn btn-ghost" onClick={() => setMonth(new Date(Date.UTC(month.getUTCFullYear(), month.getUTCMonth()+1, 1)))}><ChevronRight size={14}/></button>
       </div>
       <div className="grid grid-cols-7 text-[11px] opacity-60 mb-1">
@@ -1262,7 +1299,7 @@ function MiniCalendar({ value, onChange }: { value: Date; onChange: (d: Date) =>
   );
 }
 
-function CalendarGrid({ view, anchor, grouped, onDropTask, onReorderDay, isSelected, onSelect, accentFor, personById, personColorMap, prefs }: { view: View; anchor: Date; grouped: { start: Date; end: Date; days: [string, Task[]][] }; onDropTask: (taskIds: number[], dateStr: string) => void | Promise<void>; onReorderDay: (dateKey: string, reordered: Task[]) => void | Promise<void>; isSelected: (id: number)=>boolean; onSelect: (id: number, e: React.MouseEvent) => void; accentFor: (t: Task) => string; personById: Map<number, Person>; personColorMap: Map<number, string>; prefs: UserPrefs; }) {
+function CalendarGrid({ view, anchor, grouped, onDropTask, onReorderDay, onReorderPeriod, isSelected, onSelect, accentFor, personById, personColorMap, prefs, sortMode }: { view: View; anchor: Date; grouped: { start: Date; end: Date; days: [string, Task[]][] }; onDropTask: (taskIds: number[], dateStr: string) => void | Promise<void>; onReorderDay: (dateKey: string, reorderedIds: number[]) => void | Promise<void>; onReorderPeriod: (periodKey: string, reorderedIds: number[]) => void | Promise<void>; isSelected: (id: number)=>boolean; onSelect: (id: number, e: React.MouseEvent) => void; accentFor: (t: Task) => string; personById: Map<number, Person>; personColorMap: Map<number, string>; prefs: UserPrefs; sortMode: 'manual'|'priority'|'due'; }) {
   const start = view === 'week' ? startOfWeek(anchor) : startOfMonth(anchor);
   const startGrid = view === 'week' ? start : startOfWeek(new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth(), 1)));
   const cells: Date[] = [];
@@ -1289,17 +1326,47 @@ function CalendarGrid({ view, anchor, grouped, onDropTask, onReorderDay, isSelec
       }
     }
   }
+  const periodKey = formatISODate(start);
+  const reorderEnabled = sortMode === 'manual';
   return (
     <div className="card p-2">
       <div className="grid grid-cols-7 gap-2">
         {banners.length > 0 && (
-          <div className="col-span-7 flex flex-wrap gap-2 mb-1">
-            {banners.map(t => (
-              <div key={t.id} className="text-[12px] px-3 py-1 rounded-md border bg-white/70 dark:bg-black/40 backdrop-blur-sm" style={{borderColor: accentFor(t)}}>
-                <span className="size-2 inline-block rounded-full mr-1 align-middle" style={{background: accentFor(t)}}></span>
-                {t.title}
+          <div className="col-span-7 mb-1">
+            {reorderEnabled ? (
+              <Reorder.Group as="div" axis="x" values={banners.sort((a,b)=> (a.sort??0)-(b.sort??0)).map(t=>t.id)} onReorder={(ids)=> onReorderPeriod(periodKey, ids as number[])}>
+                <div className="flex flex-wrap gap-2">
+                  {banners.sort((a,b)=> (a.sort??0)-(b.sort??0)).map(t => (
+                    <Reorder.Item as="div" key={t.id} value={t.id} dragListener={true}>
+                      <div className="text-[12px] px-3 py-1 rounded-md border bg-white/70 dark:bg-black/40 backdrop-blur-sm cursor-grab active:cursor-grabbing" style={{borderColor: accentFor(t)}}>
+                        <span className="size-2 inline-block rounded-full mr-1 align-middle" style={{background: accentFor(t)}}></span>
+                        {t.title}
+                      </div>
+                    </Reorder.Item>
+                  ))}
+                </div>
+              </Reorder.Group>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {banners
+                  .slice()
+                  .sort((a,b)=>{
+                    if (sortMode==='priority') return (b.priority||0)-(a.priority||0);
+                    if (sortMode==='due') {
+                      const da = parseDueDate(a)?.getTime() ?? Number.POSITIVE_INFINITY;
+                      const db = parseDueDate(b)?.getTime() ?? Number.POSITIVE_INFINITY;
+                      return da - db;
+                    }
+                    return (a.sort??0)-(b.sort??0);
+                  })
+                  .map(t => (
+                  <div key={t.id} className="text-[12px] px-3 py-1 rounded-md border bg-white/70 dark:bg-black/40 backdrop-blur-sm" style={{borderColor: accentFor(t)}}>
+                    <span className="size-2 inline-block rounded-full mr-1 align-middle" style={{background: accentFor(t)}}></span>
+                    {t.title}
+                  </div>
+                ))}
               </div>
-            ))}
+            )}
           </div>
         )}
         {['Mon','Tue','Wed','Thu','Fri','Sat','Sun'].map((d)=> (
