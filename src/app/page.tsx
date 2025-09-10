@@ -357,6 +357,8 @@ export default function Home() {
   const [prefsOpen, setPrefsOpen] = useState(false);
   const [prefs, setPrefs] = useState<UserPrefs>({ relativeDates: true, timeFormat: '24h', dateFormat: 'YYYY-MM-DD' });
   const [calendarOpen, setCalendarOpen] = useState(true);
+  // Mini calendar selection: null = shade today; clicking a date sets selection
+  const [miniSelected, setMiniSelected] = useState<Date | null>(null);
   const [peopleOpen, setPeopleOpen] = useState(true);
   type SortMode = 'manual' | 'priority' | 'due';
   const [sortMode, setSortMode] = useState<SortMode>('manual');
@@ -847,7 +849,7 @@ function changeAnchor(delta: number) {
               {calendarOpen && (
                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2 }}>
                   <div className="mt-2">
-                    <MiniCalendar value={anchor} onChange={(d)=> { setAnchor(d); setView('day'); }} />
+                    <MiniCalendar value={miniSelected ?? new Date()} onChange={(d)=> { setMiniSelected(d); setAnchor(d); setView('day'); }} />
                   </div>
                 </motion.div>
               )}
@@ -1005,7 +1007,7 @@ function changeAnchor(delta: number) {
           )}
           <div className="inline-flex rounded-lg border overflow-hidden bg-white/60 dark:bg-black/30 backdrop-blur-sm">
             <button onClick={() => changeAnchor(-1)} className="px-3 py-1.5" title="Previous"><ChevronLeft size={16} /></button>
-            <button onClick={() => setAnchor(new Date())} className="px-3 py-1.5" title="Today"><Calendar size={16} /></button>
+            <button onClick={() => { setMiniSelected(null); setAnchor(new Date()); }} className="px-3 py-1.5" title="Today"><Calendar size={16} /></button>
             <button onClick={() => changeAnchor(1)} className="px-3 py-1.5" title="Next"><ChevronRight size={16} /></button>
           </div>
           <div className="text-sm opacity-70 flex items-center gap-2"><Clock size={14} /> {anchorLabel}</div>
