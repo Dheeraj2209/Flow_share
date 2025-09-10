@@ -46,7 +46,10 @@ jobs:
           # Project site base path (adjust if repo name changes)
           BASE_PATH: /Flow_share
           ASSET_PREFIX: /Flow_share/
-        run: npm run build
+        run: |
+          echo "Using API base: $NEXT_PUBLIC_API_BASE_URL"
+          echo "Building with BASE_PATH=$BASE_PATH and ASSET_PREFIX=$ASSET_PREFIX"
+          npm run build
 
       - name: Ensure Next assets are present in out
         run: |
@@ -54,6 +57,11 @@ jobs:
           if [ -d .next/static ]; then rsync -a .next/static/ out/_next/static/; fi
           if [ -d public ]; then rsync -a public/ out/; fi
           if [ -f src/app/favicon.ico ]; then cp -f src/app/favicon.ico out/favicon.ico; fi
+
+      - name: List exported files (debug)
+        run: |
+          echo "Top-level out/ files:" && ls -la out | sed -n '1,200p'
+          echo "Sample of out/_next/static:" && find out/_next/static -type f | head -n 100 || true
 
       - name: Add .nojekyll for GitHub Pages
         run: |
