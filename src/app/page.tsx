@@ -476,8 +476,23 @@ export default function Home() {
     };
     const onTaskUpdated = (e: MessageEvent) => {
       try {
-        const { task } = JSON.parse(e.data);
-        setTasks(prev => prev.map(t => t.id === task.id ? task : t));
+        const payload = JSON.parse(e.data);
+        if (payload && payload.task) {
+          const task = payload.task as Task;
+          setTasks(prev => prev.map(t => t.id === task.id ? task : t));
+        }
+        if (payload && payload.task_id && payload.done_on) {
+          const tid = Number(payload.task_id);
+          const dateKey = String(payload.done_on);
+          const done = payload.done !== false;
+          setDoneByDate(prev => {
+            const m = new Map(prev);
+            const set = new Set(m.get(dateKey) || new Set<number>());
+            if (done) set.add(tid); else set.delete(tid);
+            m.set(dateKey, set);
+            return m;
+          });
+        }
       } catch {}
     };
     const onTaskDeleted = (e: MessageEvent) => {
