@@ -2,7 +2,7 @@
 
 import { useMemo } from 'react';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
-import { addDays, formatLocalYearMonth, startOfMonth, startOfWeek } from '@/lib/date';
+import { addDays, formatLocalYearMonth, startOfMonth, startOfWeek, dateKeyInZone } from '@/lib/date';
 
 export default function MiniCalendar({ value, onChange }: { value: Date; onChange: (d: Date) => void; }) {
   const month = useMemo(() => new Date(value.getFullYear(), value.getMonth(), 1), [value]);
@@ -26,9 +26,10 @@ export default function MiniCalendar({ value, onChange }: { value: Date; onChang
       </div>
       <div className="grid grid-cols-7 gap-1">
         {cells.map((d,i) => {
-          const isToday = isSameDay(d, new Date(today.getFullYear(), today.getMonth(), today.getDate()));
-          // Shade only the client's current date; selection does not affect shading
-          const active = isToday;
+          // Shade only the client's current date in the client's timezone
+          const todayKey = dateKeyInZone(today);
+          const cellKey = dateKeyInZone(d);
+          const active = cellKey === todayKey;
           return (
             <button key={i} onClick={() => onChange(d)} className={`aspect-square rounded-md text-[12px] grid place-items-center border transition-colors ${active ? 'bg-white text-black' : sameMonth(d) ? 'hover:bg-black/5 dark:hover:bg-white/10' : 'opacity-40 hover:opacity-60 hover:bg-black/5 dark:hover:bg-white/10'}`}>
               <span>{d.getDate()}</span>

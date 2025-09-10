@@ -37,6 +37,17 @@ export function addDays(d: Date, n: number) {
   return x;
 }
 
+// Produce YYYY-MM-DD for a given date in a specified IANA timezone (defaults to client's local tz)
+export function dateKeyInZone(d: Date, timeZone?: string) {
+  try {
+    const tz = timeZone || Intl.DateTimeFormat().resolvedOptions().timeZone;
+    const fmt = new Intl.DateTimeFormat('en-CA', { timeZone: tz, year: 'numeric', month: '2-digit', day: '2-digit' });
+    return fmt.format(d);
+  } catch {
+    return formatISODate(d);
+  }
+}
+
 export function minutesToHHMM(mins: number) {
   const m = Math.max(0, Math.min(1435, Math.round(mins)));
   const hh = String(Math.floor(m / 60)).padStart(2, '0');
@@ -98,4 +109,3 @@ export function formatDateLocal(d: Date, prefs: UserPrefs) {
   if (prefs.dateFormat === 'DD/MM') return `${String(d.getDate()).padStart(2,'0')}/${String(d.getMonth()+1).padStart(2,'0')}`;
   return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
 }
-
