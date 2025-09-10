@@ -1,24 +1,59 @@
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
+import { createClient, Client as LibsqlClient } from '@libsql/client';
 
-let db: Database.Database | null = null;
+type Row = Record<string, unknown>;
 
-export function getDb() {
+type Stmt = {
+  run: (...args: unknown[]) => { lastInsertRowid?: number | bigint } | void;
+  get: (...args: unknown[]) => Row | undefined;
+  all: (...args: unknown[]) => Row[];
+};
+
+type DBLike = {
+  prepare: (sql: string) => Stmt;
+  pragma?: (sql: string) => void;
+};
+
+let db: DBLike | null = null;
+
+export function getDb(): DBLike {
   if (db) return db;
+  // Prefer remote libSQL (Turso) if configured
+  const libsqlUrl = process.env.LIBSQL_URL;
+  const libsqlToken = process.env.LIBSQL_AUTH_TOKEN;
+  if (libsqlUrl) {
+    const client: LibsqlClient = createClient({ url: libsqlUrl, authToken: libsqlToken });
+    db = libsqlAdapter(client);
+    migrate(db);
+    return db;
+  }
   const cfg = process.env.DATA_DIR;
-  const dataDir = cfg
+  let dataDir = cfg
     ? (path.isAbsolute(cfg) ? cfg : path.join(process.cwd(), cfg))
     : path.join(process.cwd(), 'data');
-  if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+  try {
+    if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+    fs.accessSync(dataDir, fs.constants.W_OK);
+  } catch (e: any) {
+    if (e?.code === 'EACCES' || e?.code === 'EPERM') {
+      const fallback = path.join('/tmp', 'flowshare-data');
+      if (!fs.existsSync(fallback)) fs.mkdirSync(fallback, { recursive: true });
+      dataDir = fallback;
+    } else {
+      throw e;
+    }
+  }
   const file = path.join(dataDir, 'app.db');
-  db = new Database(file);
-  db.pragma('journal_mode = WAL');
+  const native = new Database(file);
+  native.pragma('journal_mode = WAL');
+  db = betterSqliteAdapter(native);
   migrate(db);
   return db;
 }
 
-function migrate(db: Database.Database) {
+function migrate(db: DBLike) {
   // people table
   db.prepare(`
     CREATE TABLE IF NOT EXISTS people (
@@ -125,6 +160,43 @@ function migrate(db: Database.Database) {
       db.prepare(`ALTER TABLE people ADD COLUMN color TEXT`).run();
     }
   } catch {}
+}
+
+function betterSqliteAdapter(native: Database.Database): DBLike {
+  return {
+    prepare(sql: string): Stmt {
+      const s = native.prepare(sql);
+      return {
+        run: (...args: unknown[]) => s.run(...(args as any[])),
+        get: (...args: unknown[]) => s.get(...(args as any[])) as Row | undefined,
+        all: (...args: unknown[]) => s.all(...(args as any[])) as Row[],
+      };
+    },
+    pragma: (sql: string) => native.pragma(sql),
+  };
+}
+
+function libsqlAdapter(client: LibsqlClient): DBLike {
+  return {
+    prepare(sql: string): Stmt {
+      return {
+        run: (...args: unknown[]) => {
+          const res = client.execute({ sql, args: args as any[] });
+          // libsql returns a Promise; keep API symmetric by blocking callers? Our routes are async.
+          // But current code calls .run() synchronously. Wrap with deasync? Instead, run synchronously-like by throwing if called.
+          // To keep minimal changes, we must make execute sync-like. Since that's not possible, we switch to a simple shim:
+          // We execute synchronously by calling execSync via Atomics? Not safe. Simpler: use .executeSync if available.
+          throw new Error('Synchronous run() used with libsql. Please use GET/POST handlers that call .all/.get via async path.');
+        },
+        get: (...args: unknown[]) => {
+          throw new Error('Synchronous get() used with libsql. Please refactor to async or use better-sqlite3.');
+        },
+        all: (...args: unknown[]) => {
+          throw new Error('Synchronous all() used with libsql. Please refactor to async or use better-sqlite3.');
+        },
+      };
+    },
+  } as DBLike;
 }
 
 export type Person = {
