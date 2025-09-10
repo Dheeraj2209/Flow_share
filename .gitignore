@@ -1,0 +1,18 @@
+node_modules/
+npm-debug.log*
+yarn-error.log*
+.pnpm-store/
+.next/
+dist/
+build/
+out/
+.env*
+.env.*.local
+*.local
+.DS_Store
+.vscode/
+.idea/
+# local tooling / logs that should never be committed
+.dotcodex/
+*.log
+*.jsonl
