@@ -27,10 +27,11 @@ export default function MiniCalendar({ value, onChange }: { value: Date; onChang
       <div className="grid grid-cols-7 gap-1">
         {cells.map((d,i) => {
           const isToday = isSameDay(d, new Date(today.getFullYear(), today.getMonth(), today.getDate()));
-          const selected = isSameDay(d, value);
+          // Shade only the client's current date; selection does not affect shading
+          const active = isToday;
           return (
-            <button key={i} onClick={() => onChange(d)} className={`aspect-square rounded-md text-[12px] grid place-items-center border transition-colors ${selected ? 'bg-white text-black' : sameMonth(d) ? 'hover:bg-black/5 dark:hover:bg-white/10' : 'opacity-40 hover:opacity-60 hover:bg-black/5 dark:hover:bg-white/10'}`}>
-              <span className={`${isToday && !selected ? 'underline' : ''}`}>{d.getDate()}</span>
+            <button key={i} onClick={() => onChange(d)} className={`aspect-square rounded-md text-[12px] grid place-items-center border transition-colors ${active ? 'bg-white text-black' : sameMonth(d) ? 'hover:bg-black/5 dark:hover:bg-white/10' : 'opacity-40 hover:opacity-60 hover:bg-black/5 dark:hover:bg-white/10'}`}>
+              <span>{d.getDate()}</span>
             </button>
           );
         })}
@@ -38,4 +39,3 @@ export default function MiniCalendar({ value, onChange }: { value: Date; onChang
     </div>
   );
 }
-
