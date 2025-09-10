@@ -318,6 +318,8 @@ export default function Home() {
   const [composerHeight, setComposerHeight] = useState(0);
   const [prefsOpen, setPrefsOpen] = useState(false);
   const [prefs, setPrefs] = useState<UserPrefs>({ relativeDates: true, timeFormat: '24h', dateFormat: 'YYYY-MM-DD' });
+  const [calendarOpen, setCalendarOpen] = useState(true);
+  const [peopleOpen, setPeopleOpen] = useState(true);
 
   useEffect(() => {
     try {
@@ -325,6 +327,10 @@ export default function Home() {
       if (w) setSidebarWidth(parseInt(w));
       const o = localStorage.getItem('sidebarOpen');
       if (o) setSidebarOpen(o === '1');
+      const co = localStorage.getItem('calendarOpen');
+      if (co != null) setCalendarOpen(co === '1');
+      const po = localStorage.getItem('peopleOpen');
+      if (po != null) setPeopleOpen(po === '1');
     } catch {}
   }, []);
   useEffect(() => {
@@ -333,6 +339,12 @@ export default function Home() {
   useEffect(() => {
     try { localStorage.setItem('sidebarOpen', sidebarOpen ? '1' : '0'); } catch {}
   }, [sidebarOpen]);
+  useEffect(() => {
+    try { localStorage.setItem('calendarOpen', calendarOpen ? '1' : '0'); } catch {}
+  }, [calendarOpen]);
+  useEffect(() => {
+    try { localStorage.setItem('peopleOpen', peopleOpen ? '1' : '0'); } catch {}
+  }, [peopleOpen]);
   useEffect(() => {
     try {
       const raw = localStorage.getItem('flow_prefs');
@@ -684,106 +696,128 @@ export default function Home() {
             </div>
           </div>
         )}
-        {sidebarOpen && <MiniCalendar value={anchor} onChange={(d)=> { setAnchor(d); setView('day'); }} />}
         {sidebarOpen && (
-        <div className="card p-3">
-          <div className="flex items-center justify-between mb-2 gap-2">
-            <span className="font-medium flex items-center gap-2 min-w-0 truncate"><Users size={16} /> People</span>
-            <button
-              className={`btn ${selectedPerson === null ? 'btn-primary' : 'btn-ghost'}`}
-              onClick={() => setSelectedPerson(null)}
-              title="Show all tasks"
-            >All</button>
-          </div>
-          {sidebarOpen && (
-          <ul className="space-y-1 max-h-[40vh] overflow-auto pr-1">
+          <div className="card p-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="font-medium flex items-center gap-2 min-w-0 truncate"><Calendar size={16} /> Calendar</span>
+              <button className="icon-btn rotate-0 transition-transform" onClick={()=> setCalendarOpen(v=>!v)} title={calendarOpen? 'Collapse' : 'Expand'}>
+                <ChevronDown size={16} className={`${calendarOpen ? 'rotate-0' : '-rotate-90'} transition-transform`} />
+              </button>
+            </div>
             <AnimatePresence initial={false}>
-              {people.map(p => (
-                <PersonRow key={p.id} person={p} active={selectedPerson===p.id}
-                  progress={progressByPerson.get(p.id) || { done: 0, total: 0 }}
-                  onSelect={() => setSelectedPerson(p.id)}
-                  onUpdated={(upd)=> setPeople(prev => prev.map(x => x.id===upd.id ? upd : x))}
-                  onDeleted={()=>{
-                    setPeople(prev => prev.filter(x => x.id !== p.id));
-                    if (selectedPerson === p.id) setSelectedPerson(null);
-                  }}
-                  onEdit={() => setEditingPerson(p)}
-                />
-              ))}
-            </AnimatePresence>
-          </ul>
-          )}
-          {sidebarOpen && (
-          <form className="mt-3 flex gap-2" onSubmit={(e) => { e.preventDefault(); addPerson(new FormData(e.currentTarget)); }}>
-            <div className="relative flex-1">
-              <input id="name" name="name" placeholder="Add person" className="w-full border rounded-md px-2 py-1.5 pr-8" />
-              <UserPlus size={14} className="absolute right-2 top-1/2 -translate-y-1/2 opacity-60" />
-            </div>
-            <button className="btn btn-primary"><Plus size={14} />Add</button>
-          </form>
-          )}
-          {sidebarOpen && selectedPerson != null && (
-            <div className="mt-3 space-y-2">
-              <div className="flex items-center justify-between">
-                <div className="text-xs opacity-70">Details</div>
-                <button className="btn btn-ghost text-xs" onClick={()=> setPersonDetailsOpen(v=>!v)}>{personDetailsOpen ? 'Collapse' : 'Expand'}</button>
-              </div>
-              {personDetailsOpen && (
-              <>
-              <div className="text-xs opacity-70">Person color</div>
-              <ColorDots value={people.find(p=>p.id===selectedPerson)?.color || null} onChange={async (c)=>{
-                const id = selectedPerson!;
-                await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/people/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ color: c }) });
-                setPeople(prev => prev.map(p => p.id===id ? { ...p, color: c || null } : p));
-              }} />
-              <div className="mt-4">
-                <div className="text-xs opacity-70 mb-1">Connections</div>
-                <div className="flex flex-wrap gap-2">
-                  <button className="btn btn-ghost" onClick={()=>{ setShowConnect('apple_calendar'); setConnectUrl(''); }}>Apple Calendar</button>
-                  <button className="btn btn-ghost" onClick={()=>{ setShowConnect('apple_reminders'); setConnectUrl(''); }}>Apple Reminders</button>
-                  <button className="btn btn-ghost" onClick={()=>{ setShowConnect('outlook_calendar'); setConnectUrl(''); }}>Outlook Calendar</button>
-                  <button className="btn btn-ghost" onClick={()=>{ setShowConnect('microsoft_todo'); setConnectUrl(''); }}>Microsoft To Do</button>
-                </div>
-                {showConnect && (
-                  <div className="popover mt-2">
-                    <div className="text-xs opacity-70 mb-1">Paste public ICS URL for {showConnect.replace('_',' ')}</div>
-                    <div className="flex items-center gap-2">
-                      <input className="border rounded-md px-2 py-1 flex-1" placeholder="https://...ics" value={connectUrl} onChange={e=>setConnectUrl(e.target.value)} />
-                      <button className="btn btn-primary" onClick={async ()=>{
-                        if (!connectUrl) return;
-                        const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/sources`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ person_id: selectedPerson, provider: showConnect, url: connectUrl })});
-                        const data = await res.json();
-                        if (data?.source) setSources(prev => [data.source, ...prev]);
-                        setShowConnect(null); setConnectUrl('');
-                      }}>Connect</button>
-                      <button className="btn btn-ghost" onClick={()=> setShowConnect(null)}>Cancel</button>
-                    </div>
-                    <div className="text-[11px] opacity-60 mt-1">Tip: enable public sharing in your calendar/to-do app to obtain an ICS URL.</div>
-                    <div className="mt-2 flex gap-2">
-                      <button className="btn btn-primary" onClick={()=> window.open(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/oauth/ms/start?provider=ms_graph_calendar&personId=${selectedPerson}`, '_blank', 'width=600,height=700') }>Connect Outlook Calendar (OAuth)</button>
-                      <button className="btn btn-primary" onClick={()=> window.open(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/oauth/ms/start?provider=ms_graph_todo&personId=${selectedPerson}`, '_blank', 'width=600,height=700') }>Connect Microsoft To Do (OAuth)</button>
-                    </div>
+              {calendarOpen && (
+                <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2 }}>
+                  <div className="mt-2">
+                    <MiniCalendar value={anchor} onChange={(d)=> { setAnchor(d); setView('day'); }} />
                   </div>
-                )}
-                {sources.length>0 && (
-                  <div className="mt-2 space-y-1">
-                    {sources.map(s => (
-                      <div key={s.id} className="flex items-center justify-between text-xs">
-                        <span className="truncate">{s.provider.replace('_',' ')}: {s.url}</span>
-                        <button className="btn btn-ghost" onClick={async ()=>{
-                          await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/sources/sync`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ source_id: s.id })});
-                          fetchAll();
-                        }}>Sync now</button>
-                      </div>
-                    ))}
-                  </div>
-                )}
-              </div>
-              </>
+                </motion.div>
               )}
+            </AnimatePresence>
+          </div>
+        )}
+
+        {sidebarOpen && (
+          <div className="card p-3">
+            <div className="flex items-center justify-between mb-2 gap-2">
+              <span className="font-medium flex items-center gap-2 min-w-0 truncate"><Users size={16} /> People</span>
+              <div className="flex items-center gap-1">
+                <button className={`btn ${selectedPerson === null ? 'btn-primary' : 'btn-ghost'}`} onClick={() => setSelectedPerson(null)} title="Show all tasks">All</button>
+                <button className="icon-btn" onClick={()=> setPeopleOpen(v=>!v)} title={peopleOpen? 'Collapse' : 'Expand'}>
+                  <ChevronDown size={16} className={`${peopleOpen ? 'rotate-0' : '-rotate-90'} transition-transform`} />
+                </button>
+              </div>
             </div>
-          )}
-        </div>
+            <AnimatePresence initial={false}>
+              {peopleOpen && (
+                <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2 }}>
+                  <ul className="space-y-1 max-h-[40vh] overflow-auto pr-1">
+                    <AnimatePresence initial={false}>
+                      {people.map(p => (
+                        <PersonRow key={p.id} person={p} active={selectedPerson===p.id}
+                          progress={progressByPerson.get(p.id) || { done: 0, total: 0 }}
+                          onSelect={() => setSelectedPerson(p.id)}
+                          onUpdated={(upd)=> setPeople(prev => prev.map(x => x.id===upd.id ? upd : x))}
+                          onDeleted={()=>{
+                            setPeople(prev => prev.filter(x => x.id !== p.id));
+                            if (selectedPerson === p.id) setSelectedPerson(null);
+                          }}
+                          onEdit={() => setEditingPerson(p)}
+                        />
+                      ))}
+                    </AnimatePresence>
+                  </ul>
+                  <form className="mt-3 flex gap-2" onSubmit={(e) => { e.preventDefault(); addPerson(new FormData(e.currentTarget)); }}>
+                    <div className="relative flex-1">
+                      <input id="name" name="name" placeholder="Add person" className="w-full border rounded-md px-2 py-1.5 pr-8" />
+                      <UserPlus size={14} className="absolute right-2 top-1/2 -translate-y-1/2 opacity-60" />
+                    </div>
+                    <button className="btn btn-primary"><Plus size={14} />Add</button>
+                  </form>
+                  {selectedPerson != null && (
+                    <div className="mt-3 space-y-2">
+                      <div className="flex items-center justify-between">
+                        <div className="text-xs opacity-70">Details</div>
+                        <button className="btn btn-ghost text-xs" onClick={()=> setPersonDetailsOpen(v=>!v)}>{personDetailsOpen ? 'Collapse' : 'Expand'}</button>
+                      </div>
+                      {personDetailsOpen && (
+                      <>
+                      <div className="text-xs opacity-70">Person color</div>
+                      <ColorDots value={people.find(p=>p.id===selectedPerson)?.color || null} onChange={async (c)=>{
+                        const id = selectedPerson!;
+                        await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/people/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ color: c }) });
+                        setPeople(prev => prev.map(p => p.id===id ? { ...p, color: c || null } : p));
+                      }} />
+                      <div className="mt-4">
+                        <div className="text-xs opacity-70 mb-1">Connections</div>
+                        <div className="flex flex-wrap gap-2">
+                          <button className="btn btn-ghost" onClick={()=>{ setShowConnect('apple_calendar'); setConnectUrl(''); }}>Apple Calendar</button>
+                          <button className="btn btn-ghost" onClick={()=>{ setShowConnect('apple_reminders'); setConnectUrl(''); }}>Apple Reminders</button>
+                          <button className="btn btn-ghost" onClick={()=>{ setShowConnect('outlook_calendar'); setConnectUrl(''); }}>Outlook Calendar</button>
+                          <button className="btn btn-ghost" onClick={()=>{ setShowConnect('microsoft_todo'); setConnectUrl(''); }}>Microsoft To Do</button>
+                        </div>
+                        {showConnect && (
+                          <div className="popover mt-2">
+                            <div className="text-xs opacity-70 mb-1">Paste public ICS URL for {showConnect.replace('_',' ')}</div>
+                            <div className="flex items-center gap-2">
+                              <input className="border rounded-md px-2 py-1 flex-1" placeholder="https://...ics" value={connectUrl} onChange={e=>setConnectUrl(e.target.value)} />
+                              <button className="btn btn-primary" onClick={async ()=>{
+                                if (!connectUrl) return;
+                                const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/sources`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ person_id: selectedPerson, provider: showConnect, url: connectUrl })});
+                                const data = await res.json();
+                                if (data?.source) setSources(prev => [data.source, ...prev]);
+                                setShowConnect(null); setConnectUrl('');
+                              }}>Connect</button>
+                              <button className="btn btn-ghost" onClick={()=> setShowConnect(null)}>Cancel</button>
+                            </div>
+                            <div className="text-[11px] opacity-60 mt-1">Tip: enable public sharing in your calendar/to-do app to obtain an ICS URL.</div>
+                            <div className="mt-2 flex gap-2">
+                              <button className="btn btn-primary" onClick={()=> window.open(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/oauth/ms/start?provider=ms_graph_calendar&personId=${selectedPerson}`, '_blank', 'width=600,height=700') }>Connect Outlook Calendar (OAuth)</button>
+                              <button className="btn btn-primary" onClick={()=> window.open(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/oauth/ms/start?provider=ms_graph_todo&personId=${selectedPerson}`, '_blank', 'width=600,height=700') }>Connect Microsoft To Do (OAuth)</button>
+                            </div>
+                          </div>
+                        )}
+                        {sources.length>0 && (
+                          <div className="mt-2 space-y-1">
+                            {sources.map(s => (
+                              <div key={s.id} className="flex items-center justify-between text-xs">
+                                <span className="truncate">{s.provider.replace('_',' ')}: {s.url}</span>
+                                <button className="btn btn-ghost" onClick={async ()=>{
+                                  await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/sources/sync`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ source_id: s.id })});
+                                  fetchAll();
+                                }}>Sync now</button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      </>
+                      )}
+                    </div>
+                  )}
+                </motion.div>
+              )}
+            </AnimatePresence>
+          </div>
         )}
         {(!isMobile && sidebarOpen) && (
           <div
