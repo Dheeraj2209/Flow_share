@@ -719,7 +719,7 @@ function changeAnchor(delta: number) {
               {calendarOpen && (
                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2 }}>
                   <div className="mt-2">
-                    <MiniCalendar value={miniSelected ?? new Date()} onChange={(d)=> { setMiniSelected(d); setAnchor(d); setView('day'); }} />
+                    <MiniCalendar onChange={(d)=> { setMiniSelected(d); setAnchor(d); setView('day'); }} />
                   </div>
                 </motion.div>
               )}
