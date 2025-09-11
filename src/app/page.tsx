@@ -2,91 +2,20 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence, Reorder, useDragControls } from "framer-motion";
-// @ts-expect-error - chrono-node has no ESM types here in this setup
-import * as chrono from 'chrono-node';
 import { Calendar, Check, ChevronLeft, ChevronRight, ListPlus, Plus, Share2, UserPlus, Users, Repeat, Clock, Trash2, Pencil, User, ChevronDown, Hash, Settings2, GripVertical, BookOpen } from "lucide-react";
-// Swap MiniCalendar to DayPicker-based variant
+// Components
 import MiniCalendar from '@/components/MiniCalendar';
+// Types & utils
 import { Person, Task, ExternalSource, View, UserPrefs } from '@/types';
-import { startOfWeek, startOfMonth, formatISODate, formatLocalISODate, formatLocalYearMonth, addDays, minutesToHHMM, hhmmToMinutes, nextWeekday, parseDueDate as parseDueDateUtil, isOverdueDate, formatTimeLocal, formatDateLocal } from '@/lib/date';
+import { startOfWeek, startOfMonth, formatISODate, formatLocalISODate, addDays, minutesToHHMM, hhmmToMinutes, nextWeekday, parseDueDate as parseDueDateUtil, isOverdueDate, formatTimeLocal, formatDateLocal, isSameDay } from '@/lib/date';
+import { parseQuickAdd } from '@/lib/parse';
+import { expandTaskInstances } from '@/lib/schedule';
+import { hashToHsl, withAlpha, statusColor, priorityClass } from '@/lib/colors';
+import { getAll, createPerson as apiCreatePerson, updateTask as apiUpdateTask, toggleTaskDoneOnDate, deleteTask as apiDeleteTask, updatePerson as apiUpdatePerson, deletePerson as apiDeletePerson, getSources as apiGetSources, createSource as apiCreateSource, updateSource as apiUpdateSource, syncSource as apiSyncSource, deleteSource as apiDeleteSource, createTask as apiCreateTask } from '@/services/api';
+import { useIsMobile } from '@/hooks/useIsMobile';
+import { useLocalStorage } from '@/hooks/useLocalStorage';
 
-// moved to '@/lib/date'
-
-function parseQuickAdd(text: string, base: Date) {
-  const result: { title: string; due_date?: string; due_time?: string; recurrence?: Task['recurrence']; byweekday?: number[]; interval?: number; color?: string; priority?: number; assignee?: string; scope?: View } = { title: text.trim() };
-  if (!text.trim()) return result;
-  // Use chrono to find date/time
-  const parsed = chrono.parse(text, base);
-  if (parsed && parsed[0]) {
-    const p = parsed[0];
-    const dt = p.start?.date?.() as Date | undefined;
-    if (dt) {
-      // Interpret parsed date in local timezone
-      result.due_date = formatISODate(dt);
-      if (p.start?.isCertain('hour')) {
-        const hh = String(dt.getHours()).padStart(2, '0');
-        const mm = String(dt.getMinutes()).padStart(2, '0');
-        result.due_time = `${hh}:${mm}`;
-      }
-    }
-  }
-  // Recurrence detection
-  const lower = text.toLowerCase();
-  if (/(every|each)\s+day|\bdaily\b/.test(lower)) result.recurrence = 'daily';
-  if (/(every|each)\s+week|\bweekly\b/.test(lower)) result.recurrence = 'weekly';
-  if (/(every|each)\s+month|\bmonthly\b/.test(lower)) result.recurrence = 'monthly';
-  const intervalMatch = lower.match(/every\s+(\d+)\s+(day|week|month)/);
-  if (intervalMatch) result.interval = Math.max(1, parseInt(intervalMatch[1] || '1'));
-  // Weekday parsing for weekly patterns
-  if (result.recurrence === 'weekly') {
-    const days = ['sun','mon','tue','wed','thu','fri','sat'];
-    const selected: number[] = [];
-    days.forEach((d,i) => { if (new RegExp(`\\b${d}(?:day)?\\b`).test(lower)) selected.push(i); });
-    if (selected.length) result.byweekday = selected;
-    else if (result.due_date) {
-      const dd = new Date(result.due_date + 'T00:00:00');
-      result.byweekday = [dd.getDay()];
-    }
-  }
-  // Color and priority and assignee
-  const colorMap: Record<string,string> = { red:'#ef4444', orange:'#f97316', yellow:'#eab308', green:'#22c55e', teal:'#06b6d4', cyan:'#06b6d4', blue:'#3b82f6', indigo:'#6366f1', violet:'#8b5cf6', purple:'#8b5cf6', pink:'#ec4899' };
-  const colorMatch = lower.match(/#(red|orange|yellow|green|teal|cyan|blue|indigo|violet|purple|pink)\b/);
-  if (colorMatch) result.color = colorMap[colorMatch[1]];
-  if (/#p?3\b|#high\b|!{2,}/.test(lower)) result.priority = 3;
-  else if (/#p?2\b|#med\b|#medium\b|!{1}/.test(lower)) result.priority = 2;
-  else if (/#p?1\b|#low\b/.test(lower)) result.priority = 1;
-  const atMatch = text.match(/@([\p{L}\d_-]+)/u);
-  if (atMatch) result.assignee = atMatch[1];
-  const scopeMatch = lower.match(/#(day|week|month)\b/);
-  if (scopeMatch) result.scope = scopeMatch[1] as View;
-  return result;
-}
-
-function hashToHsl(input: string | number, s = 60, l = 52) {
-  const str = String(input);
-  let h = 0;
-  for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) >>> 0;
-  return `hsl(${h % 360} ${s}% ${l}%)`;
-}
-
-function statusColor(status: Task["status"]) {
-  switch (status) {
-    case "done": return "bg-emerald-500/20 text-emerald-800 dark:text-emerald-200 border-emerald-600/30";
-    case "in_progress": return "bg-amber-500/20 text-amber-800 dark:text-amber-200 border-amber-600/30";
-    default: return "bg-sky-500/20 text-sky-800 dark:text-sky-200 border-sky-600/30";
-  }
-}
-
-function withAlpha(hsl: string, a: number) {
-  return hsl.replace(/\)$/, ` / ${a})`);
-}
-
-function priorityClass(p?: number) {
-  if (!p) return '';
-  if (p >= 3) return 'bg-rose-500/15 text-rose-700 border-rose-600/30';
-  if (p === 2) return 'bg-amber-500/15 text-amber-700 border-amber-600/30';
-  return 'bg-sky-500/15 text-sky-800 border-sky-600/30';
-}
+// helpers moved to '@/lib/*'
 
 function parseDueDate(task: Task): Date | null {
   return parseDueDateUtil(task.due_date, task.due_time);
@@ -110,79 +39,7 @@ function formatDueLabel(task: Task, prefs: UserPrefs) {
   return `${datePart}${datePart && timePart ? ' ' : ''}${timePart}`;
 }
 
-function expandWeekly(task: Task, rangeStart: Date, rangeEnd: Date) {
-  const results: string[] = [];
-  if (!task.byweekday) return results;
-  const days: number[] = JSON.parse(task.byweekday || "[]");
-  const interval = Math.max(1, task.interval || 1);
-  // Find first week anchor
-  let cur = startOfWeek(rangeStart);
-  while (cur < rangeEnd) {
-    for (const dw of days) {
-      const d = addDays(cur, (dw + 7 - 1) % 7); // 0=Sun -> Mon-based
-      if (d >= rangeStart && d < rangeEnd) results.push(formatISODate(d));
-    }
-    cur = addDays(cur, 7 * interval);
-  }
-  return Array.from(new Set(results)).sort();
-}
-
-function expandTaskInstances(task: Task, view: View, anchor: Date) {
-  const start = view === "day" ? new Date(anchor.getFullYear(), anchor.getMonth(), anchor.getDate()) : view === "week" ? startOfWeek(anchor) : startOfMonth(anchor);
-  const end = view === "day" ? addDays(start, 1) : view === "week" ? addDays(start, 7) : new Date(start.getFullYear(), start.getMonth() + 1, 1);
-  const keyDate = (d: Date) => formatISODate(d);
-  if (task.recurrence === "none") {
-    // Single instance falls into bucket match
-    if (task.bucket_type === view) {
-      const t = task.bucket_date;
-      if (t) {
-        const td = new Date(t + "T00:00:00");
-        if (td >= start && td < end) return [keyDate(td)];
-      }
-    }
-    return [];
-  }
-
-  if (task.recurrence === "daily") {
-    const interval = Math.max(1, task.interval || 1);
-    // Start from either bucket_date or start
-    let cur = task.bucket_date ? new Date(task.bucket_date + "T00:00:00") : start;
-    // Move cur to >= start
-    if (cur < start) {
-      const diffDays = Math.floor((start.getTime() - cur.getTime()) / 86400000);
-      const steps = Math.ceil(diffDays / interval);
-      cur = addDays(cur, steps * interval);
-    }
-    const dates: string[] = [];
-    const until = task.until ? new Date(task.until + "T00:00:00") : null;
-    while (cur < end && (!until || cur <= until)) {
-      dates.push(keyDate(cur));
-      cur = addDays(cur, interval);
-    }
-    return dates;
-  }
-
-  if (task.recurrence === "weekly") {
-    return expandWeekly(task, start, end);
-  }
-
-  if (task.recurrence === "monthly") {
-    // Occurs on the same day number each month starting from bucket_date
-    const interval = Math.max(1, task.interval || 1);
-    const anchorDate = task.bucket_date ? new Date(task.bucket_date + "T00:00:00") : start;
-    const day = anchorDate.getDate();
-    let cur = new Date(start.getFullYear(), start.getMonth(), day);
-    if (cur < start) cur = new Date(start.getFullYear(), start.getMonth() + 1, day);
-    const until = task.until ? new Date(task.until + "T00:00:00") : null;
-    const dates: string[] = [];
-    while (cur < end && (!until || cur <= until)) {
-      if (cur >= start) dates.push(keyDate(cur));
-      cur = new Date(cur.getFullYear(), cur.getMonth() + interval, day);
-    }
-    return dates;
-  }
-  return [];
-}
+// recurrence helpers moved to '@/lib/schedule'
 
 // realtime updates handled inline with incremental SSE handlers
 
@@ -215,9 +72,9 @@ export default function Home() {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selected, setSelected] = useState<Set<number>>(new Set());
-  const [sidebarOpen, setSidebarOpen] = useState(true);
-  const [sidebarWidth, setSidebarWidth] = useState<number>(288);
-  const [isMobile, setIsMobile] = useState(false);
+  const [sidebarOpen, setSidebarOpen] = useLocalStorage<boolean>('sidebarOpen', true);
+  const [sidebarWidth, setSidebarWidth] = useLocalStorage<number>('sidebarWidth', 288);
+  const isMobile = useIsMobile(768);
   const [sources, setSources] = useState<ExternalSource[]>([]);
   const [showConnect, setShowConnect] = useState<string | null>(null);
   const [connectUrl, setConnectUrl] = useState<string>('');
@@ -225,88 +82,32 @@ export default function Home() {
   const [editingPerson, setEditingPerson] = useState<Person | null>(null);
   const [composerHeight, setComposerHeight] = useState(0);
   const [prefsOpen, setPrefsOpen] = useState(false);
-  const [prefs, setPrefs] = useState<UserPrefs>({ relativeDates: true, timeFormat: '24h', dateFormat: 'YYYY-MM-DD' });
-  const [calendarOpen, setCalendarOpen] = useState(true);
+  const [prefs, setPrefs] = useLocalStorage<UserPrefs>('flow_prefs', { relativeDates: true, timeFormat: '24h', dateFormat: 'YYYY-MM-DD' });
+  const [calendarOpen, setCalendarOpen] = useLocalStorage<boolean>('calendarOpen', true);
   // Mini calendar selection: null = shade today; clicking a date sets selection
   const [miniSelected, setMiniSelected] = useState<Date | null>(null);
-  const [peopleOpen, setPeopleOpen] = useState(true);
+  const [peopleOpen, setPeopleOpen] = useLocalStorage<boolean>('peopleOpen', true);
   type SortMode = 'manual' | 'priority' | 'due';
-  const [sortMode, setSortMode] = useState<SortMode>('manual');
+  const [sortMode, setSortMode] = useLocalStorage<SortMode>('sortMode', 'manual');
   // Manual order for any tasks on a specific date (YYYY-MM-DD -> ids)
-  const [orderByDate, setOrderByDate] = useState<Map<string, number[]>>(new Map());
-
-  useEffect(() => {
-    try {
-      const w = localStorage.getItem('sidebarWidth');
-      if (w) setSidebarWidth(parseInt(w));
-      const o = localStorage.getItem('sidebarOpen');
-      if (o) setSidebarOpen(o === '1');
-      const co = localStorage.getItem('calendarOpen');
-      if (co != null) setCalendarOpen(co === '1');
-      const po = localStorage.getItem('peopleOpen');
-      if (po != null) setPeopleOpen(po === '1');
-      const sm = localStorage.getItem('sortMode');
-      if (sm === 'manual' || sm === 'priority' || sm === 'due') setSortMode(sm);
-      const ob = localStorage.getItem('orderByDate');
-      if (ob) {
+  const [orderByDate, setOrderByDate] = useLocalStorage<Map<string, number[]>>(
+    'orderByDate',
+    new Map(),
+    {
+      serialize: (m) => JSON.stringify(Object.fromEntries(m)),
+      deserialize: (s) => {
         try {
-          const parsed = JSON.parse(ob) as Record<string, number[]>;
-          const m = new Map<string, number[]>();
-          for (const k of Object.keys(parsed)) m.set(k, parsed[k]);
-          setOrderByDate(m);
-        } catch {}
+          const obj = JSON.parse(s) as Record<string, number[]>;
+          return new Map(Object.entries(obj));
+        } catch {
+          return new Map();
+        }
       }
-    } catch {}
-  }, []);
-  useEffect(() => {
-    try { localStorage.setItem('sidebarWidth', String(sidebarWidth)); } catch {}
-  }, [sidebarWidth]);
-  useEffect(() => {
-    try { localStorage.setItem('sidebarOpen', sidebarOpen ? '1' : '0'); } catch {}
-  }, [sidebarOpen]);
-  useEffect(() => {
-    try { localStorage.setItem('calendarOpen', calendarOpen ? '1' : '0'); } catch {}
-  }, [calendarOpen]);
-  useEffect(() => {
-    try {
-      const obj: Record<string, number[]> = {};
-      orderByDate.forEach((v,k) => { obj[k] = v; });
-      localStorage.setItem('orderByDate', JSON.stringify(obj));
-    } catch {}
-  }, [orderByDate]);
-  useEffect(() => {
-    try { localStorage.setItem('peopleOpen', peopleOpen ? '1' : '0'); } catch {}
-  }, [peopleOpen]);
-  useEffect(() => {
-    try { localStorage.setItem('sortMode', sortMode); } catch {}
-  }, [sortMode]);
-  useEffect(() => {
-    try {
-      const raw = localStorage.getItem('flow_prefs');
-      if (raw) {
-        const p = JSON.parse(raw);
-        setPrefs((prev) => ({ ...prev, ...p }));
-      }
-    } catch {}
-  }, []);
-  useEffect(() => {
-    try { localStorage.setItem('flow_prefs', JSON.stringify(prefs)); } catch {}
-  }, [prefs]);
-  useEffect(() => {
-    try {
-      const v = localStorage.getItem('personDetailsOpen');
-      if (v != null) setPersonDetailsOpen(v === '1');
-    } catch {}
-  }, []);
-  useEffect(() => {
-    try { localStorage.setItem('personDetailsOpen', personDetailsOpen ? '1' : '0'); } catch {}
-  }, [personDetailsOpen]);
-  useEffect(() => {
-    const update = () => setIsMobile(window.innerWidth < 768);
-    update();
-    window.addEventListener('resize', update);
-    return () => window.removeEventListener('resize', update);
-  }, []);
+    }
+  );
+
+  const [personDetailsOpen, setPersonDetailsOpen] = useLocalStorage<boolean>('personDetailsOpen', true);
+  // isMobile tracked via hook
 
   const anchorLabel = useMemo(() => {
     const d = anchor;
@@ -327,22 +128,10 @@ export default function Home() {
     setLoading(true);
     setError(null);
     try {
-      const [pRes, tRes] = await Promise.all([
-        fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/people`).then(r => r.json()),
-        fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/tasks`).then(r => r.json()),
-      ]);
-      setPeople(pRes.people || []);
-      setTasks(tRes.tasks || []);
-      const map = new Map<string, Set<number>>();
-      if (Array.isArray(tRes.doneDates)) {
-        for (const row of tRes.doneDates) {
-          const date = String(row.date);
-          const tid = Number(row.task_id);
-          if (!map.has(date)) map.set(date, new Set());
-          map.get(date)!.add(tid);
-        }
-      }
-      setDoneByDate(map);
+      const { people: p, tasks: t, doneByDate: dmap } = await getAll();
+      setPeople(p);
+      setTasks(t);
+      setDoneByDate(dmap);
     } catch (e: any) {
       setError(e?.message || 'Failed to load');
     } finally {
@@ -357,7 +146,7 @@ export default function Home() {
   useEffect(() => {
     // fetch sources for selected person
     if (selectedPerson != null) {
-      fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/sources?personId=${selectedPerson}`).then(r=>r.json()).then(d=> setSources(d.sources||[])).catch(()=>setSources([]));
+      apiGetSources(selectedPerson).then(d=> setSources(d.sources||[])).catch(()=>setSources([]));
     }
   }, [selectedPerson]);
 
@@ -388,7 +177,7 @@ export default function Home() {
             if (!t || t.bucket_type !== 'day') continue;
             const mins = hhmmToMinutes((t.due_time || '09:00')) + delta;
             const clamped = Math.max(0, Math.min(1435, mins));
-            await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/tasks/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ due_time: minutesToHHMM(clamped) }) });
+            await apiUpdateTask(id, { due_time: minutesToHHMM(clamped) });
           }
         })();
       }
@@ -588,9 +377,8 @@ export default function Home() {
   async function addPerson(formData: FormData) {
     const name = String(formData.get('name') || '').trim();
     if (!name) return;
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/people`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
     try {
-      const data = await res.json();
+      const data = await apiCreatePerson(name);
       if (data?.person) setPeople(prev => prev.some(p=>p.id===data.person.id) ? prev : [...prev, data.person]);
     } catch {}
     (document.getElementById('name') as HTMLInputElement).value = '';
@@ -612,7 +400,7 @@ export default function Home() {
         return m;
       });
       try {
-        await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/tasks/${task.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ done_on: dateKey, done: !isDone }) });
+        await toggleTaskDoneOnDate(task.id, dateKey, !isDone);
       } catch {
         fetchAll();
       }
@@ -621,7 +409,7 @@ export default function Home() {
     // non-recurring: toggle whole task status
     const status = task.status === 'done' ? 'todo' : 'done';
     setTasks(prev => prev.map(t => t.id === task.id ? { ...t, status } : t));
-    fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/tasks/${task.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ status }) }).catch(()=>{
+    apiUpdateTask(task.id, { status }).catch(()=>{
       fetchAll();
     });
   }
@@ -630,7 +418,7 @@ export default function Home() {
     if (!confirm('Delete task?')) return;
     // optimistic
     setTasks(prev => prev.filter(t => t.id !== task.id));
-    fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/tasks/${task.id}`, { method: 'DELETE' }).catch(()=>{
+    apiDeleteTask(task.id).catch(()=>{
       fetchAll();
     });
   }
@@ -664,7 +452,7 @@ export default function Home() {
         return Array.from(map.values());
       });
       for (const u of updates) {
-        await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/tasks/${u.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sort: u.sort }) });
+        await apiUpdateTask(u.id, { sort: u.sort });
       }
     }
   }
@@ -683,7 +471,7 @@ export default function Home() {
     }
     setTasks(prev => prev.map(t => (setIds.has(t.id) && t.bucket_type===view && t.bucket_date===periodKey) ? { ...t, sort: (updates.find(u=>u.id===t.id)?.sort ?? (t.sort||0)) } : t));
     for (const u of updates) {
-      await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/tasks/${u.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sort: u.sort }) });
+      await apiUpdateTask(u.id, { sort: u.sort });
     }
   }
 
@@ -806,7 +594,7 @@ function changeAnchor(delta: number) {
                       <div className="text-xs opacity-70">Person color</div>
                       <ColorDots value={people.find(p=>p.id===selectedPerson)?.color || null} onChange={async (c)=>{
                         const id = selectedPerson!;
-                        await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/people/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ color: c }) });
+                        await apiUpdatePerson(id, { color: c || null });
                         setPeople(prev => prev.map(p => p.id===id ? { ...p, color: c || null } : p));
                       }} />
                       <div className="mt-4">
@@ -824,10 +612,12 @@ function changeAnchor(delta: number) {
                               <input className="border rounded-md px-2 py-1 flex-1" placeholder="https://...ics" value={connectUrl} onChange={e=>setConnectUrl(e.target.value)} />
                               <button className="btn btn-primary" onClick={async ()=>{
                                 if (!connectUrl) return;
-                                const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/sources`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ person_id: selectedPerson, provider: showConnect, url: connectUrl })});
-                                const data = await res.json();
-                                if (data?.source) setSources(prev => [data.source, ...prev]);
-                                setShowConnect(null); setConnectUrl('');
+                                try {
+                                  const data = await apiCreateSource(selectedPerson!, showConnect!, connectUrl);
+                                  if (data?.source) setSources(prev => [data.source, ...prev]);
+                                } finally {
+                                  setShowConnect(null); setConnectUrl('');
+                                }
                               }}>Connect</button>
                               <button className="btn btn-ghost" onClick={()=> setShowConnect(null)}>Cancel</button>
                             </div>
@@ -844,7 +634,7 @@ function changeAnchor(delta: number) {
                               <div key={s.id} className="flex items-center justify-between text-xs">
                                 <span className="truncate">{s.provider.replace('_',' ')}: {s.url}</span>
                                 <button className="btn btn-ghost" onClick={async ()=>{
-                                  await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/sources/sync`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ source_id: s.id })});
+                                  await apiSyncSource(s.id);
                                   fetchAll();
                                 }}>Sync now</button>
                               </div>
@@ -935,7 +725,7 @@ function changeAnchor(delta: number) {
             onChangeTime={async (id, hhmm) => {
               // optimistic
               setTasks(prev => prev.map(t => t.id===id ? { ...t, due_time: hhmm } : t));
-              await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/tasks/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ due_time: hhmm }) });
+              await apiUpdateTask(id, { due_time: hhmm });
             }}
             isSelected={(id)=> selected.has(id)}
             onSelect={(id, e)=>{
@@ -967,7 +757,7 @@ function changeAnchor(delta: number) {
               }));
               for (let i=0;i<ids.length;i++) {
                 const id = ids[i];
-                await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/tasks/${id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bucket_type: 'day', bucket_date: dateStr, sort: baseNext + i }) });
+                await apiUpdateTask(id, { bucket_type: 'day', bucket_date: dateStr, sort: baseNext + i });
               }
             }}
             onReorderDay={onReorderDay}
@@ -1062,9 +852,8 @@ function changeAnchor(delta: number) {
         view={view}
         anchor={anchor}
         onSubmit={async (payload) => {
-          const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/tasks`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
           try {
-            const data = await res.json();
+            const data = await apiCreateTask(payload);
             if (data?.task) setTasks(prev => prev.some(t=>t.id===data.task.id) ? prev : [data.task, ...prev]);
           } catch {}
         }}
@@ -1094,7 +883,7 @@ function TaskRow({ task, onToggle, onDelete, selected=false, onSelect, accentCol
   const saving = useRef(false);
   async function save() {
     saving.current = true;
-    await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/tasks/${task.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ title, due_date: due || null, due_time: dueTime || null, color, priority }) });
+    await apiUpdateTask(task.id, { title, due_date: due || null, due_time: dueTime || null, color, priority });
     setEditing(false);
     saving.current = false;
   }
@@ -1434,7 +1223,7 @@ function PersonRow({ person, active, onSelect, progress, onUpdated, onDeleted, o
   const color = person.color || hashToHsl(person.id);
   async function remove() {
     if (!confirm('Delete person? Their tasks will be unassigned.')) return;
-    await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/people/${person.id}`, { method:'DELETE' });
+    await apiDeletePerson(person.id);
     onDeleted();
   }
   return (
@@ -1542,12 +1331,11 @@ function PersonModal({ person, onClose, onSaved }: { person: Person; onClose: ()
   const [editingSourceId, setEditingSourceId] = useState<number | null>(null);
   const [editingSourceUrl, setEditingSourceUrl] = useState<string>('');
   useEffect(() => {
-    fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/sources?personId=${person.id}`).then(r=>r.json()).then(d=> setSources(d.sources||[])).catch(()=>setSources([]));
+    apiGetSources(person.id).then(d=> setSources(d.sources||[])).catch(()=>setSources([]));
   }, [person.id]);
 
   async function save() {
-    const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/people/${person.id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ name, color })});
-    const data = await res.json();
+    const data = await apiUpdatePerson(person.id, { name, color });
     if (data?.person) onSaved(data.person);
     onClose();
   }
@@ -1583,10 +1371,12 @@ function PersonModal({ person, onClose, onSaved }: { person: Person; onClose: ()
                   <input className="border rounded-md px-2 py-1 flex-1" placeholder="https://...ics" value={connectUrl} onChange={e=>setConnectUrl(e.target.value)} />
                   <button className="btn btn-primary" onClick={async ()=>{
                     if (!connectUrl) return;
-                    const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/sources`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ person_id: person.id, provider: showConnect, url: connectUrl })});
-                    const data = await res.json();
-                    if (data?.source) setSources(prev => [data.source, ...prev]);
-                    setShowConnect(null); setConnectUrl('');
+                    try {
+                      const data = await apiCreateSource(person.id, showConnect!, connectUrl);
+                      if (data?.source) setSources(prev => [data.source, ...prev]);
+                    } finally {
+                      setShowConnect(null); setConnectUrl('');
+                    }
                   }}>Connect</button>
                   <button className="btn btn-ghost" onClick={()=> setShowConnect(null)}>Cancel</button>
                 </div>
@@ -1602,8 +1392,7 @@ function PersonModal({ person, onClose, onSaved }: { person: Person; onClose: ()
                       <>
                         <input className="border rounded-md px-2 py-0.5 text-xs flex-1" value={editingSourceUrl} onChange={e=>setEditingSourceUrl(e.target.value)} placeholder="https://...ics" />
                         <button className="btn btn-primary" onClick={async ()=>{
-                          const res = await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/sources/${s.id}`, { method:'PUT', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ url: editingSourceUrl || null })});
-                          const data = await res.json();
+                          const data = await apiUpdateSource(s.id, { url: editingSourceUrl || null });
                           if (data?.source) setSources(prev => prev.map(x => x.id===s.id ? data.source : x));
                           setEditingSourceId(null); setEditingSourceUrl('');
                         }}>Save</button>
@@ -1612,11 +1401,11 @@ function PersonModal({ person, onClose, onSaved }: { person: Person; onClose: ()
                     ) : (
                       <>
                         <button className="btn btn-ghost" onClick={async ()=>{
-                          await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/sources/sync`, { method:'POST', headers:{'Content-Type':'application/json'}, body: JSON.stringify({ source_id: s.id })});
+                          await apiSyncSource(s.id);
                         }}>Sync now</button>
                         <button className="btn btn-ghost" onClick={()=>{ setEditingSourceId(s.id); setEditingSourceUrl(s.url || ''); }}>Edit</button>
                         <button className="btn btn-ghost text-red-600" onClick={async ()=>{
-                          await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/sources/${s.id}`, { method:'DELETE' });
+                          await apiDeleteSource(s.id);
                           setSources(prev => prev.filter(x => x.id !== s.id));
                         }}>Delete</button>
                       </>

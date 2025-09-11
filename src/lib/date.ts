@@ -37,6 +37,10 @@ export function addDays(d: Date, n: number) {
   return x;
 }
 
+export function isSameDay(a: Date, b: Date) {
+  return a.getFullYear() === b.getFullYear() && a.getMonth() === b.getMonth() && a.getDate() === b.getDate();
+}
+
 // Produce YYYY-MM-DD for a given date in a specified IANA timezone (defaults to client's local tz)
 export function dateKeyInZone(d: Date, timeZone?: string) {
   try {
