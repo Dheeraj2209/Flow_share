@@ -78,7 +78,6 @@ export default function Home() {
   const [sources, setSources] = useState<ExternalSource[]>([]);
   const [showConnect, setShowConnect] = useState<string | null>(null);
   const [connectUrl, setConnectUrl] = useState<string>('');
-  const [personDetailsOpen, setPersonDetailsOpen] = useState(true);
   const [editingPerson, setEditingPerson] = useState<Person | null>(null);
   const [composerHeight, setComposerHeight] = useState(0);
   const [prefsOpen, setPrefsOpen] = useState(false);
