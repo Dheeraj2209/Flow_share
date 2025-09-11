@@ -232,6 +232,8 @@ export default function Home() {
   const [peopleOpen, setPeopleOpen] = useState(true);
   type SortMode = 'manual' | 'priority' | 'due';
   const [sortMode, setSortMode] = useState<SortMode>('manual');
+  // Manual order for any tasks on a specific date (YYYY-MM-DD -> ids)
+  const [orderByDate, setOrderByDate] = useState<Map<string, number[]>>(new Map());
 
   useEffect(() => {
     try {
@@ -245,6 +247,15 @@ export default function Home() {
       if (po != null) setPeopleOpen(po === '1');
       const sm = localStorage.getItem('sortMode');
       if (sm === 'manual' || sm === 'priority' || sm === 'due') setSortMode(sm);
+      const ob = localStorage.getItem('orderByDate');
+      if (ob) {
+        try {
+          const parsed = JSON.parse(ob) as Record<string, number[]>;
+          const m = new Map<string, number[]>();
+          for (const k of Object.keys(parsed)) m.set(k, parsed[k]);
+          setOrderByDate(m);
+        } catch {}
+      }
     } catch {}
   }, []);
   useEffect(() => {
@@ -256,6 +267,13 @@ export default function Home() {
   useEffect(() => {
     try { localStorage.setItem('calendarOpen', calendarOpen ? '1' : '0'); } catch {}
   }, [calendarOpen]);
+  useEffect(() => {
+    try {
+      const obj: Record<string, number[]> = {};
+      orderByDate.forEach((v,k) => { obj[k] = v; });
+      localStorage.setItem('orderByDate', JSON.stringify(obj));
+    } catch {}
+  }, [orderByDate]);
   useEffect(() => {
     try { localStorage.setItem('peopleOpen', peopleOpen ? '1' : '0'); } catch {}
   }, [peopleOpen]);
@@ -493,7 +511,7 @@ export default function Home() {
       // Recurring: expand to dates
       for (const date of expandTaskInstances(t, view, anchor)) push(date, t);
     }
-    // Sort tasks inside each day by 'sort' (if present), then status then title
+    // Sort tasks inside each day
     for (const [k, arr] of map) {
       arr.sort((a, b) => {
         // Sorting strategy
@@ -505,7 +523,15 @@ export default function Home() {
           const db = parseDueDate(b)?.getTime() ?? Number.POSITIVE_INFINITY;
           if (da !== db) return da - db;
         } else {
-          // manual uses 'sort' for day tasks only
+          // manual: use persisted order (any task), fallback to 'sort' for day tasks
+          const orderList = orderByDate.get(k) || [];
+          const ia = orderList.indexOf(a.id);
+          const ib = orderList.indexOf(b.id);
+          if (ia !== -1 || ib !== -1) {
+            const xa = ia === -1 ? Number.MAX_SAFE_INTEGER : ia;
+            const xb = ib === -1 ? Number.MAX_SAFE_INTEGER : ib;
+            if (xa !== xb) return xa - xb;
+          }
           const sa = a.sort ?? 0, sb = b.sort ?? 0;
           if (sa !== sb) return sa - sb;
         }
@@ -520,7 +546,7 @@ export default function Home() {
       end,
       days: Array.from(map.entries()).sort((a,b) => a[0].localeCompare(b[0]))
     };
-  }, [tasks, selectedPerson, view, anchor, refresh.current, doneByDate, sortMode]);
+  }, [tasks, selectedPerson, view, anchor, refresh.current, doneByDate, sortMode, orderByDate]);
 
   const personColorMap = useMemo(() => {
     const m = new Map<number, string>();
@@ -610,8 +636,13 @@ export default function Home() {
   }
 
   async function onReorderDay(dateKey: string, reorderedIds: number[]) {
-    // Persist sort only for day-level tasks matching this dateKey
-    // Compute minimal set of updates
+    // Store full order for this date (affects all tasks, including recurring)
+    setOrderByDate(prev => {
+      const next = new Map(prev);
+      next.set(dateKey, Array.from(reorderedIds));
+      return next;
+    });
+    // Persist sort for day-level tasks only (backend schema)
     const updates: { id: number; sort: number }[] = [];
     let idx = 0;
     for (const id of reorderedIds) {
@@ -623,18 +654,18 @@ export default function Home() {
         idx++;
       }
     }
-    // Optimistic update: apply new ordering in state
-    setTasks(prev => {
-      const map = new Map(prev.map(p => [p.id, p] as const));
+    if (updates.length) {
+      setTasks(prev => {
+        const map = new Map(prev.map(p => [p.id, p] as const));
+        for (const u of updates) {
+          const cur = map.get(u.id);
+          if (cur) map.set(u.id, { ...cur, sort: u.sort });
+        }
+        return Array.from(map.values());
+      });
       for (const u of updates) {
-        const cur = map.get(u.id);
-        if (cur) map.set(u.id, { ...cur, sort: u.sort });
+        await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/tasks/${u.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sort: u.sort }) });
       }
-      return Array.from(map.values());
-    });
-    // Persist sequentially
-    for (const u of updates) {
-      await fetch(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/tasks/${u.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ sort: u.sort }) });
     }
   }
   async function onReorderPeriod(periodKey: string, reorderedIds: number[]) {
@@ -719,7 +750,7 @@ function changeAnchor(delta: number) {
               {calendarOpen && (
                 <motion.div initial={{ height: 0, opacity: 0 }} animate={{ height: 'auto', opacity: 1 }} exit={{ height: 0, opacity: 0 }} transition={{ duration: 0.2 }}>
                   <div className="mt-2">
-                    <MiniCalendar onChange={(d)=> { setMiniSelected(d); setAnchor(d); setView('day'); }} />
+                    <MiniCalendar value={anchor} onChange={(d)=> { setMiniSelected(d); setAnchor(d); setView('day'); }} />
                   </div>
                 </motion.div>
               )}
@@ -969,17 +1000,15 @@ function changeAnchor(delta: number) {
             <AnimatePresence initial={false}>
               {grouped.days.map(([date, items]) => {
                 const safeItems = (items || []).filter(Boolean) as Task[];
-                const dayOnly = safeItems.filter(t => t.recurrence === 'none' && t.bucket_type === 'day' && t.bucket_date === date);
-                const otherItems = safeItems.filter(t => !dayOnly.includes(t));
-                const dayIds = dayOnly.map(t => t.id);
+                const allIds = safeItems.map(t => t.id);
                 const reorderEnabled = sortMode === 'manual';
                 return (
                 <motion.section key={date} layout initial={{opacity:0, y:8}} animate={{opacity:1, y:0}} exit={{opacity:0, y:-8}}>
                   <h3 className="font-medium mb-3 flex items-center gap-2"><Calendar size={14} /> {date}</h3>
                   {reorderEnabled ? (
-                    <Reorder.Group as="div" axis="y" values={dayIds} onReorder={(ids) => onReorderDay(date, ids as number[])}>
+                    <Reorder.Group as="div" axis="y" values={allIds} onReorder={(ids) => onReorderDay(date, ids as number[])}>
                       <AnimatePresence initial={false}>
-                        {dayOnly.map(task => (
+                        {safeItems.map(task => (
                           <ReorderableRow key={task.id} valueId={task.id}>
                             {(start)=> (
                               <TaskRow task={task} selected={selected.has(task.id)} accentColor={accentFor(task)} prefs={prefs}
@@ -1004,28 +1033,8 @@ function changeAnchor(delta: number) {
                     </Reorder.Group>
                   ) : (
                     <div className="flex flex-col gap-1">
-                      {dayOnly.map(task => (
+                      {safeItems.map(task => (
                         <TaskRow key={task.id} task={task} selected={selected.has(task.id)} accentColor={accentFor(task)} prefs={prefs}
-                          onSelect={(id,e)=>{
-                            setSelected(prev => {
-                              const next = new Set(prev);
-                              if (e.shiftKey || e.ctrlKey || e.metaKey) {
-                                if (next.has(id)) next.delete(id); else next.add(id);
-                              } else { next.clear(); next.add(id); }
-                              return next;
-                            });
-                          }} onToggle={() => toggleDone(task, date)} onDelete={() => deleteTask(task)}
-                          personName={personById.get(task.person_id || -1)?.name}
-                          personColor={personById.get(task.person_id || -1)?.color || personColorMap.get(task.person_id || -1)}
-                          instanceDone={task.recurrence !== 'none' ? (doneByDate.get(date)?.has(task.id) || false) : (task.status==='done')}
-                        />
-                      ))}
-                    </div>
-                  )}
-                  {otherItems.length > 0 && (
-                    <div className="flex flex-col gap-1 mt-2">
-                      {otherItems.map(task => (
-                        <TaskRow key={`o-${task.id}-${date}`} task={task} selected={selected.has(task.id)} accentColor={accentFor(task)} prefs={prefs}
                           onSelect={(id,e)=>{
                             setSelected(prev => {
                               const next = new Set(prev);
