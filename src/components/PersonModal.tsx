@@ -46,6 +46,8 @@ export default function PersonModal({ person, onClose, onSaved }: { person: Pers
               <button className="btn btn-ghost" onClick={()=>{ setShowConnect('microsoft_todo'); setConnectUrl(''); }}>Microsoft To Do (ICS)</button>
               <button className="btn btn-primary" onClick={()=> window.open(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/oauth/ms/start?provider=ms_graph_calendar&personId=${person.id}`, '_blank', 'width=600,height=700') }>Connect Outlook Calendar (OAuth)</button>
               <button className="btn btn-primary" onClick={()=> window.open(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/oauth/ms/start?provider=ms_graph_todo&personId=${person.id}`, '_blank', 'width=600,height=700') }>Connect Microsoft To Do (OAuth)</button>
+              <button className="btn btn-primary" onClick={()=> window.open(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/oauth/google/start?provider=google_calendar&personId=${person.id}`, '_blank', 'width=600,height=700') }>Connect Google Calendar (OAuth)</button>
+              <button className="btn btn-primary" onClick={()=> window.open(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/oauth/google/start?provider=google_tasks&personId=${person.id}`, '_blank', 'width=600,height=700') }>Connect Google Tasks (OAuth)</button>
             </div>
             {showConnect && (
               <div className="popover mt-2">
@@ -107,4 +109,3 @@ export default function PersonModal({ person, onClose, onSaved }: { person: Pers
     </div>
   );
 }
-

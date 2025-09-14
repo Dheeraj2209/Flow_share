@@ -63,8 +63,16 @@ export default function TutorialPage() {
         <ul className="list-disc pl-5 space-y-1 text-sm">
           <li>Select a person → Connections: add Apple Calendar/Reminders, Outlook Calendar, or Microsoft To Do.</li>
           <li>ICS: paste a public .ics URL and Connect. Click “Sync now” anytime.</li>
-          <li>Microsoft OAuth: Connect Outlook Calendar or To Do via Microsoft login (requires env setup).</li>
-          <li>Sync maps events/tasks to day tasks with titles, dates, and times; updates use source IDs to avoid duplicates.</li>
+          <li>OAuth: Connect Microsoft (Outlook/To Do) and Google (Calendar/Tasks) with login (requires env setup).</li>
+          <li>Two‑way sync: imports external events/tasks and pushes local changes back when you click “Sync now”.</li>
+          <li>Note: Apple Reminders/Calendar via ICS is read‑only; Apple does not provide a public Reminders API.</li>
+          <li>Apple Reminders via Shortcuts (two‑way helper):
+            <ul className="list-disc pl-5 mt-1 space-y-1">
+              <li>POST webhook (from Shortcuts): <code>/api/integrations/apple/reminders/webhook</code> with JSON: <code>{`{ personId, secret?, reminderId, title, due_date, due_time, completed, deleted }`}</code></li>
+              <li>GET pull (for Shortcuts to mirror): <code>/api/integrations/apple/reminders/pull?personId=123&since=YYYY-MM-DDTHH:mm:ssZ</code></li>
+              <li>Tip: Include a shared <code>secret</code> to lock down the webhook. The first call will store it for that person.</li>
+            </ul>
+          </li>
         </ul>
       </section>
 
@@ -97,6 +105,7 @@ export default function TutorialPage() {
               <li>Realtime: <code>/api/stream</code> (SSE)</li>
               <li>Connections: <code>/api/sources</code> (GET, POST), <code>/api/sources/sync</code> (POST)</li>
               <li>Microsoft OAuth: <code>/api/oauth/ms/start</code>, <code>/api/oauth/ms/callback</code></li>
+              <li>Google OAuth: <code>/api/oauth/google/start</code>, <code>/api/oauth/google/callback</code></li>
             </ul>
           </li>
           <li><b>Schema & Migrations</b> (auto-applied on boot) in <code>src/lib/db.ts</code>:

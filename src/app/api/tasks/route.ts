@@ -49,7 +49,83 @@ export async function POST(req: NextRequest) {
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [title, description, person_id, status, due_date, due_time, bucket_type, bucket_date, recurrence, interval, byweekday, until, sort, color, priority]
   );
-  const task = await db.get(`SELECT * FROM tasks WHERE id = ?`, [info.lastInsertRowid as number]);
+  let task = await db.get(`SELECT * FROM tasks WHERE id = ?`, [info.lastInsertRowid as number]);
+
+  // Optional: create on external provider if source_id is provided
+  try {
+    const source_id = body.source_id != null ? Number(body.source_id) : null;
+    if (source_id) {
+      const src = await db.get(`SELECT * FROM external_sources WHERE id = ?`, [source_id]) as any | undefined;
+      if (src?.access_token) {
+        const headers: HeadersInit = { Authorization: `Bearer ${src.access_token}` };
+        const t: any = task;
+        if (src.provider === 'ms_graph_todo') {
+          const lists = await fetch('https://graph.microsoft.com/v1.0/me/todo/lists', { headers }).then(r=>r.json()).catch(()=>({ value: [] as any[] }));
+          const firstListId = lists?.value?.[0]?.id;
+          if (firstListId) {
+            const bodyOut: any = { title };
+            if (due_date) {
+              const dt = due_time ? `${due_date}T${due_time}:00` : `${due_date}T00:00:00`;
+              bodyOut.dueDateTime = { dateTime: dt, timeZone: 'UTC' };
+            }
+            const created = await fetch(`https://graph.microsoft.com/v1.0/me/todo/lists/${firstListId}/tasks`, {
+              method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(bodyOut)
+            }).then(r=>r.ok?r.json():null).catch(()=>null) as { id?: string } | null;
+            if (created?.id) {
+              await db.run(`UPDATE tasks SET source_id=?, external_id=? WHERE id=?`, [source_id, `${firstListId}:${created.id}`, t.id]);
+              task = await db.get(`SELECT * FROM tasks WHERE id = ?`, [t.id]);
+            }
+          }
+        } else if (src.provider === 'ms_graph_calendar') {
+          const bodyOut: any = { subject: title };
+          if (due_date) {
+            const dt = due_time ? `${due_date}T${due_time}:00` : `${due_date}T00:00:00`;
+            bodyOut.start = { dateTime: dt, timeZone: 'UTC' };
+            bodyOut.end = { dateTime: dt, timeZone: 'UTC' };
+          }
+          const created = await fetch(`https://graph.microsoft.com/v1.0/me/events`, {
+            method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(bodyOut)
+          }).then(r=>r.ok?r.json():null).catch(()=>null) as { id?: string } | null;
+          if (created?.id) {
+            await db.run(`UPDATE tasks SET source_id=?, external_id=? WHERE id=?`, [source_id, created.id, (task as any).id]);
+            task = await db.get(`SELECT * FROM tasks WHERE id = ?`, [(task as any).id]);
+          }
+        } else if (src.provider === 'google_tasks') {
+          const lists = await fetch('https://www.googleapis.com/tasks/v1/users/@me/lists', { headers }).then(r=>r.json()).catch(()=>({ items: [] as any[] }));
+          const firstListId = lists?.items?.[0]?.id;
+          if (firstListId) {
+            const bodyOut: any = { title };
+            if (due_date) bodyOut.due = due_time ? `${due_date}T${due_time}:00.000Z` : `${due_date}T00:00:00.000Z`;
+            const created = await fetch(`https://www.googleapis.com/tasks/v1/lists/${firstListId}/tasks`, {
+              method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(bodyOut)
+            }).then(r=>r.ok?r.json():null).catch(()=>null) as { id?: string } | null;
+            if (created?.id) {
+              await db.run(`UPDATE tasks SET source_id=?, external_id=? WHERE id=?`, [source_id, `${firstListId}:${created.id}`, (task as any).id]);
+              task = await db.get(`SELECT * FROM tasks WHERE id = ?`, [(task as any).id]);
+            }
+          }
+        } else if (src.provider === 'google_calendar') {
+          const bodyOut: any = { summary: title };
+          if (due_date) {
+            if (due_time) {
+              bodyOut.start = { dateTime: `${due_date}T${due_time}:00Z` };
+              bodyOut.end = { dateTime: `${due_date}T${due_time}:00Z` };
+            } else {
+              bodyOut.start = { date: due_date };
+              bodyOut.end = { date: due_date };
+            }
+          }
+          const created = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events`, {
+            method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(bodyOut)
+          }).then(r=>r.ok?r.json():null).catch(()=>null) as { id?: string } | null;
+          if (created?.id) {
+            await db.run(`UPDATE tasks SET source_id=?, external_id=? WHERE id=?`, [source_id, created.id, (task as any).id]);
+            task = await db.get(`SELECT * FROM tasks WHERE id = ?`, [(task as any).id]);
+          }
+        }
+      }
+    }
+  } catch {}
   broadcast('task_created', { task });
   return Response.json({ task }, { status: 201, headers: corsHeaders() });
 }

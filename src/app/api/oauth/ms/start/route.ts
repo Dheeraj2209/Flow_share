@@ -12,8 +12,8 @@ export async function GET(req: NextRequest) {
   if (!clientId) return new Response('MS_CLIENT_ID missing', { status: 500 });
   const redirectUri = `${origin}/api/oauth/ms/callback`;
   const scopes = provider === 'ms_graph_calendar'
-    ? 'offline_access Calendars.Read'
-    : 'offline_access Tasks.Read';
+    ? 'offline_access Calendars.ReadWrite'
+    : 'offline_access Tasks.ReadWrite';
   const url = new URL(`https://login.microsoftonline.com/${tenant}/oauth2/v2.0/authorize`);
   url.searchParams.set('client_id', clientId);
   url.searchParams.set('response_type', 'code');
@@ -22,4 +22,3 @@ export async function GET(req: NextRequest) {
   url.searchParams.set('state', JSON.stringify({ personId, provider }));
   return Response.redirect(url.toString(), 302);
 }
-

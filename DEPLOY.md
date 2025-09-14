@@ -8,6 +8,10 @@ Environment Variables
 - NEXT_PUBLIC_API_BASE_URL: Public URL of your backend API host, e.g. https://flowshare.example.com
 - CORS_ORIGIN: Origin allowed to call the APIs, e.g. https://Dheeraj2209.github.io (defaults to *)
 - DATA_DIR: Directory on the backend host to store the SQLite DB (optional). If unset, defaults to ./data under the working directory.
+- Microsoft OAuth (optional, for Outlook Calendar / Microsoft To Do connections):
+  - MS_CLIENT_ID, MS_CLIENT_SECRET, MS_TENANT_ID (use `common` for multi-tenant)
+- Google OAuth (optional, for Google Calendar / Google Tasks connections):
+  - GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET
 
 GitHub Pages
 1) In your repo settings → Pages, set the source to "GitHub Actions".
