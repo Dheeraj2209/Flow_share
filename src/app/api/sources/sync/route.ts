@@ -461,7 +461,11 @@ export async function POST(req: NextRequest) {
         )) as any[];
         for (const t of localTasks) {
           if (!t.external_id) {
-            const body: any = { title: t.title };
+            const body: any = {
+              title: t.title,
+              notes: t.description,
+              status: t.status === "done" ? "completed" : "needsAction",
+            };
             if (t.due_date) {
               const dueDate = t.due_date;
               body.due = t.due_time
@@ -501,12 +505,17 @@ export async function POST(req: NextRequest) {
               ? String(t.external_id).split(":", 2)
               : [firstListId, t.external_id];
             const listId = listIdRaw || firstListId;
-            const body: any = { title: t.title };
+            const body: any = {
+              title: t.title,
+              notes: t.description,
+              status: t.status === "done" ? "completed" : "needsAction",
+            };
             if (t.due_date) {
-              const dueDate = t.due_date;
               body.due = t.due_time
-                ? `${dueDate}T${t.due_time}:00Z`
-                : `${dueDate}T00:00:00Z`;
+                ? `${t.due_date}T${t.due_time}:00Z`
+                : `${t.due_date}T00:00:00Z`;
+            } else {
+              body.due = null;
             }
             await fetch(
               `https://www.googleapis.com/tasks/v1/lists/${listId}/tasks/${taskId}`,

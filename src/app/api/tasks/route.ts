@@ -195,6 +195,10 @@ export async function POST(req: NextRequest) {
           const firstListId = defaultListId || lists?.items?.[0]?.id;
           if (firstListId) {
             const bodyOut: any = { title };
+            if (description) {
+              bodyOut.notes = description;
+            }
+            bodyOut.status = status === "done" ? "completed" : "needsAction";
             if (due_date) {
               const dueDate = due_date;
               bodyOut.due = due_time
