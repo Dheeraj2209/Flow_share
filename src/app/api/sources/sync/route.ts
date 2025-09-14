@@ -462,11 +462,12 @@ export async function POST(req: NextRequest) {
         for (const t of localTasks) {
           if (!t.external_id) {
             const body: any = { title: t.title };
-            const today = new Date().toISOString().slice(0, 10);
-            const dueDate = t.due_date || today;
-            body.due = t.due_time
-              ? `${dueDate}T${t.due_time}:00Z`
-              : `${dueDate}T00:00:00Z`;
+            if (t.due_date) {
+              const dueDate = t.due_date;
+              body.due = t.due_time
+                ? `${dueDate}T${t.due_time}:00Z`
+                : `${dueDate}T00:00:00Z`;
+            }
             const created = (await fetch(
               `https://www.googleapis.com/tasks/v1/lists/${firstListId}/tasks`,
               {
@@ -501,11 +502,12 @@ export async function POST(req: NextRequest) {
               : [firstListId, t.external_id];
             const listId = listIdRaw || firstListId;
             const body: any = { title: t.title };
-            const today = new Date().toISOString().slice(0, 10);
-            const dueDate = t.due_date || today;
-            body.due = t.due_time
-              ? `${dueDate}T${t.due_time}:00Z`
-              : `${dueDate}T00:00:00Z`;
+            if (t.due_date) {
+              const dueDate = t.due_date;
+              body.due = t.due_time
+                ? `${dueDate}T${t.due_time}:00Z`
+                : `${dueDate}T00:00:00Z`;
+            }
             await fetch(
               `https://www.googleapis.com/tasks/v1/lists/${listId}/tasks/${taskId}`,
               {

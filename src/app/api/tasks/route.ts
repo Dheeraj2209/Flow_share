@@ -195,11 +195,12 @@ export async function POST(req: NextRequest) {
           const firstListId = defaultListId || lists?.items?.[0]?.id;
           if (firstListId) {
             const bodyOut: any = { title };
-            const today = new Date().toISOString().slice(0, 10);
-            const dueDate = due_date || today;
-            bodyOut.due = due_time
-              ? `${dueDate}T${due_time}:00Z`
-              : `${dueDate}T00:00:00Z`;
+            if (due_date) {
+              const dueDate = due_date;
+              bodyOut.due = due_time
+                ? `${dueDate}T${due_time}:00Z`
+                : `${dueDate}T00:00:00Z`;
+            }
             const created = (await fetch(
               `https://www.googleapis.com/tasks/v1/lists/${firstListId}/tasks`,
               {
