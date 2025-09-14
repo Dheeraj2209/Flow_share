@@ -2,6 +2,7 @@ import { NextRequest } from 'next/server';
 import { getDb } from '@/lib/db';
 import ical from 'node-ical';
 import { corsHeaders, preflight } from '@/lib/cors';
+import { broadcast } from '@/lib/sse';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
@@ -58,8 +59,12 @@ async function importICS(url: string, person_id: number, source_id: number) {
     const existing = await db.get(`SELECT id FROM tasks WHERE source_id = ? AND external_id = ?`, [source_id, t.external_id]) as RowId | undefined;
     if (existing?.id) {
       await db.run(`UPDATE tasks SET title=?, due_date=?, due_time=?, bucket_type='day', bucket_date=? WHERE id = ?`, [t.title, t.due_date, t.due_time, t.due_date, existing.id]);
+      const task = await db.get(`SELECT * FROM tasks WHERE id = ?`, [existing.id]);
+      if (task) broadcast('task_updated', { task });
     } else {
-      await db.run(insertSQL, [t.title, person_id, t.due_date, t.due_time, t.due_date, source_id, t.external_id]);
+      const info = await db.run(insertSQL, [t.title, person_id, t.due_date, t.due_time, t.due_date, source_id, t.external_id]);
+      const task = await db.get(`SELECT * FROM tasks WHERE id = ?`, [info.lastInsertRowid as number]);
+      if (task) broadcast('task_created', { task });
     }
   }
   return { imported: tasks.length };
@@ -99,9 +104,13 @@ export async function POST(req: NextRequest) {
               const selectRow = await db.get(`SELECT id FROM tasks WHERE source_id=? AND external_id=?`, [src.id, external_id]) as RowId | undefined;
               if (selectRow?.id) {
                 await db.run(`UPDATE tasks SET title=?, due_date=?, due_time=?, bucket_type='day', bucket_date=? WHERE id=?`, [title, due_date, due_time, due_date, selectRow.id]);
+                const task = await db.get(`SELECT * FROM tasks WHERE id = ?`, [selectRow.id]);
+                if (task) broadcast('task_updated', { task });
               } else {
-                await db.run(`INSERT INTO tasks (title, person_id, status, due_date, due_time, bucket_type, bucket_date, recurrence, interval, sort, source_id, external_id)
+                const info = await db.run(`INSERT INTO tasks (title, person_id, status, due_date, due_time, bucket_type, bucket_date, recurrence, interval, sort, source_id, external_id)
                   VALUES (?, ?, 'todo', ?, ?, 'day', ?, 'none', 1, 0, ?, ?)`, [title, src.person_id, due_date, due_time, due_date, src.id, external_id]);
+                const task = await db.get(`SELECT * FROM tasks WHERE id = ?`, [info.lastInsertRowid as number]);
+                if (task) broadcast('task_created', { task });
               }
               result.imported++;
             }
@@ -162,9 +171,13 @@ export async function POST(req: NextRequest) {
           const selectRow = await db.get(`SELECT id FROM tasks WHERE source_id=? AND external_id=?`, [src.id, external_id]) as RowId | undefined;
           if (selectRow?.id) {
             await db.run(`UPDATE tasks SET title=?, due_date=?, due_time=?, bucket_type='day', bucket_date=? WHERE id=?`, [title, due_date, due_time, due_date, selectRow.id]);
+            const task = await db.get(`SELECT * FROM tasks WHERE id = ?`, [selectRow.id]);
+            if (task) broadcast('task_updated', { task });
           } else {
-            await db.run(`INSERT INTO tasks (title, person_id, status, due_date, due_time, bucket_type, bucket_date, recurrence, interval, sort, source_id, external_id)
+            const info = await db.run(`INSERT INTO tasks (title, person_id, status, due_date, due_time, bucket_type, bucket_date, recurrence, interval, sort, source_id, external_id)
               VALUES (?, ?, 'todo', ?, ?, 'day', ?, 'none', 1, 0, ?, ?)`, [title, src.person_id, due_date, due_time, due_date, src.id, external_id]);
+            const task = await db.get(`SELECT * FROM tasks WHERE id = ?`, [info.lastInsertRowid as number]);
+            if (task) broadcast('task_created', { task });
           }
           result.imported++;
         }
@@ -223,7 +236,9 @@ export async function POST(req: NextRequest) {
         for (const t of localTasks) {
           if (!t.external_id) {
             const body: any = { title: t.title };
-            if (t.due_date) body.due = t.due_time ? `${t.due_date}T${t.due_time}:00.000Z` : `${t.due_date}T00:00:00.000Z`;
+            const today = new Date().toISOString().slice(0,10);
+            const dueDate = t.due_date || today;
+            body.due = t.due_time ? `${dueDate}T${t.due_time}:00.000Z` : `${dueDate}T00:00:00.000Z`;
             const created = await fetch(`https://www.googleapis.com/tasks/v1/lists/${firstListId}/tasks`, {
               method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body)
             }).then(r=>r.ok?r.json():null).catch(()=>null) as { id?: string } | null;
@@ -231,7 +246,9 @@ export async function POST(req: NextRequest) {
           } else {
             const [listId, taskId] = String(t.external_id).includes(':') ? String(t.external_id).split(':',2) : [firstListId, t.external_id];
             const body: any = { title: t.title };
-            if (t.due_date) body.due = t.due_time ? `${t.due_date}T${t.due_time}:00.000Z` : `${t.due_date}T00:00:00.000Z`;
+            const today = new Date().toISOString().slice(0,10);
+            const dueDate = t.due_date || today;
+            body.due = t.due_time ? `${dueDate}T${t.due_time}:00.000Z` : `${dueDate}T00:00:00.000Z`;
             await fetch(`https://www.googleapis.com/tasks/v1/lists/${listId}/tasks/${taskId}`, {
               method: 'PATCH', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body)
             }).catch(()=>{});
@@ -269,15 +286,15 @@ export async function POST(req: NextRequest) {
       const localTasks = await db.query(`SELECT * FROM tasks WHERE source_id = ?`, [src.id]) as any[];
       for (const t of localTasks) {
         const body: any = { summary: t.title };
-        if (t.due_date) {
-          const dt = t.due_time ? `${t.due_date}T${t.due_time}:00Z` : `${t.due_date}`;
-          if (t.due_time) {
-            body.start = { dateTime: dt };
-            body.end = { dateTime: dt };
-          } else {
-            body.start = { date: t.due_date };
-            body.end = { date: t.due_date };
-          }
+        const today = new Date().toISOString().slice(0,10);
+        const dueDate = t.due_date || today;
+        if (t.due_time) {
+          const dt = `${dueDate}T${t.due_time}:00Z`;
+          body.start = { dateTime: dt };
+          body.end = { dateTime: dt };
+        } else {
+          body.start = { date: dueDate };
+          body.end = { date: dueDate };
         }
         if (!t.external_id) {
           const created = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events`, {

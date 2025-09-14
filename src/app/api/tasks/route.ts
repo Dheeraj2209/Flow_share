@@ -95,7 +95,9 @@ export async function POST(req: NextRequest) {
           const firstListId = lists?.items?.[0]?.id;
           if (firstListId) {
             const bodyOut: any = { title };
-            if (due_date) bodyOut.due = due_time ? `${due_date}T${due_time}:00.000Z` : `${due_date}T00:00:00.000Z`;
+            const today = new Date().toISOString().slice(0,10);
+            const dueDate = due_date || today;
+            bodyOut.due = due_time ? `${dueDate}T${due_time}:00.000Z` : `${dueDate}T00:00:00.000Z`;
             const created = await fetch(`https://www.googleapis.com/tasks/v1/lists/${firstListId}/tasks`, {
               method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(bodyOut)
             }).then(r=>r.ok?r.json():null).catch(()=>null) as { id?: string } | null;
@@ -106,14 +108,14 @@ export async function POST(req: NextRequest) {
           }
         } else if (src.provider === 'google_calendar') {
           const bodyOut: any = { summary: title };
-          if (due_date) {
-            if (due_time) {
-              bodyOut.start = { dateTime: `${due_date}T${due_time}:00Z` };
-              bodyOut.end = { dateTime: `${due_date}T${due_time}:00Z` };
-            } else {
-              bodyOut.start = { date: due_date };
-              bodyOut.end = { date: due_date };
-            }
+          const today = new Date().toISOString().slice(0,10);
+          const dueDate = due_date || today;
+          if (due_time) {
+            bodyOut.start = { dateTime: `${dueDate}T${due_time}:00Z` };
+            bodyOut.end = { dateTime: `${dueDate}T${due_time}:00Z` };
+          } else {
+            bodyOut.start = { date: dueDate };
+            bodyOut.end = { date: dueDate };
           }
           const created = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events`, {
             method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(bodyOut)
