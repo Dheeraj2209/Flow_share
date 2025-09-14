@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence, Reorder, useDragControls } from "framer-motion";
-import { Calendar, Check, ChevronLeft, ChevronRight, ListPlus, Plus, Share2, UserPlus, Users, Repeat, Clock, Trash2, Pencil, User, ChevronDown, Hash, Settings2, GripVertical, BookOpen } from "lucide-react";
+import { Calendar, Check, ChevronLeft, ChevronRight, ListPlus, Plus, Share2, UserPlus, Users, Repeat, Clock, Trash2, Pencil, User, ChevronDown, Hash, Settings2, GripVertical, BookOpen, Apple } from "lucide-react";
 // Components
 import MiniCalendar from '@/components/MiniCalendar';
 // Types & utils
@@ -599,10 +599,18 @@ function changeAnchor(delta: number) {
                       <div className="mt-4">
                         <div className="text-xs opacity-70 mb-1">Connections</div>
                         <div className="flex flex-wrap gap-2">
-                          <button className="btn btn-ghost" onClick={()=>{ setShowConnect('apple_calendar'); setConnectUrl(''); }}>Apple Calendar</button>
-                          <button className="btn btn-ghost" onClick={()=>{ setShowConnect('apple_reminders'); setConnectUrl(''); }}>Apple Reminders</button>
-                          <button className="btn btn-ghost" onClick={()=>{ setShowConnect('outlook_calendar'); setConnectUrl(''); }}>Outlook Calendar</button>
-                          <button className="btn btn-ghost" onClick={()=>{ setShowConnect('microsoft_todo'); setConnectUrl(''); }}>Microsoft To Do</button>
+                          <button className="btn btn-ghost inline-flex items-center gap-1" onClick={()=>{ setShowConnect('apple_calendar'); setConnectUrl(''); }}>
+                            <Apple size={14} /> Apple Calendar
+                          </button>
+                          <button className="btn btn-ghost inline-flex items-center gap-1" onClick={()=>{ setShowConnect('apple_reminders'); setConnectUrl(''); }}>
+                            <Apple size={14} /> Apple Reminders
+                          </button>
+                          <button className="btn btn-ghost inline-flex items-center gap-1" onClick={()=>{ setShowConnect('outlook_calendar'); setConnectUrl(''); }}>
+                            <Calendar size={14} className="text-[#0078D4]" /> Outlook Calendar
+                          </button>
+                          <button className="btn btn-ghost inline-flex items-center gap-1" onClick={()=>{ setShowConnect('microsoft_todo'); setConnectUrl(''); }}>
+                            <ListPlus size={14} className="text-[#2564EB]" /> Microsoft To Do
+                          </button>
                         </div>
                         {showConnect && (
                           <div className="popover mt-2">
@@ -621,9 +629,19 @@ function changeAnchor(delta: number) {
                               <button className="btn btn-ghost" onClick={()=> setShowConnect(null)}>Cancel</button>
                             </div>
                             <div className="text-[11px] opacity-60 mt-1">Tip: enable public sharing in your calendar/to-do app to obtain an ICS URL.</div>
-                            <div className="mt-2 flex gap-2">
-                              <button className="btn btn-primary" onClick={()=> window.open(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/oauth/ms/start?provider=ms_graph_calendar&personId=${selectedPerson}`, '_blank', 'width=600,height=700') }>Connect Outlook Calendar (OAuth)</button>
-                              <button className="btn btn-primary" onClick={()=> window.open(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/oauth/ms/start?provider=ms_graph_todo&personId=${selectedPerson}`, '_blank', 'width=600,height=700') }>Connect Microsoft To Do (OAuth)</button>
+                            <div className="mt-2 flex flex-wrap gap-2">
+                              <button className="btn btn-primary inline-flex items-center gap-1" onClick={()=> window.open(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/oauth/ms/start?provider=ms_graph_calendar&personId=${selectedPerson}`, '_blank', 'width=600,height=700') }>
+                                <Calendar size={14} /> Connect Outlook Calendar (OAuth)
+                              </button>
+                              <button className="btn btn-primary inline-flex items-center gap-1" onClick={()=> window.open(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/oauth/ms/start?provider=ms_graph_todo&personId=${selectedPerson}`, '_blank', 'width=600,height=700') }>
+                                <ListPlus size={14} /> Connect Microsoft To Do (OAuth)
+                              </button>
+                              <button className="btn btn-primary inline-flex items-center gap-1" onClick={()=> window.open(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/oauth/google/start?provider=google_calendar&personId=${selectedPerson}`, '_blank', 'width=600,height=700') }>
+                                <Calendar size={14} className="text-[#4285F4]" /> Connect Google Calendar (OAuth)
+                              </button>
+                              <button className="btn btn-primary inline-flex items-center gap-1" onClick={()=> window.open(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/oauth/google/start?provider=google_tasks&personId=${selectedPerson}`, '_blank', 'width=600,height=700') }>
+                                <ListPlus size={14} className="text-[#34A853]" /> Connect Google Tasks (OAuth)
+                              </button>
                             </div>
                           </div>
                         )}
@@ -1356,12 +1374,30 @@ function PersonModal({ person, onClose, onSaved }: { person: Person; onClose: ()
           <div>
             <div className="text-xs opacity-70 mb-1">Connections</div>
             <div className="flex flex-wrap gap-2">
-              <button className="btn btn-ghost" onClick={()=>{ setShowConnect('apple_calendar'); setConnectUrl(''); }}>Apple Calendar (ICS)</button>
-              <button className="btn btn-ghost" onClick={()=>{ setShowConnect('apple_reminders'); setConnectUrl(''); }}>Apple Reminders (ICS)</button>
-              <button className="btn btn-ghost" onClick={()=>{ setShowConnect('outlook_calendar'); setConnectUrl(''); }}>Outlook Calendar (ICS)</button>
-              <button className="btn btn-ghost" onClick={()=>{ setShowConnect('microsoft_todo'); setConnectUrl(''); }}>Microsoft To Do (ICS)</button>
-              <button className="btn btn-primary" onClick={()=> window.open(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/oauth/ms/start?provider=ms_graph_calendar&personId=${person.id}`, '_blank', 'width=600,height=700') }>Connect Outlook Calendar (OAuth)</button>
-              <button className="btn btn-primary" onClick={()=> window.open(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/oauth/ms/start?provider=ms_graph_todo&personId=${person.id}`, '_blank', 'width=600,height=700') }>Connect Microsoft To Do (OAuth)</button>
+              <button className="btn btn-ghost inline-flex items-center gap-1" onClick={()=>{ setShowConnect('apple_calendar'); setConnectUrl(''); }}>
+                <Apple size={14} /> Apple Calendar (ICS)
+              </button>
+              <button className="btn btn-ghost inline-flex items-center gap-1" onClick={()=>{ setShowConnect('apple_reminders'); setConnectUrl(''); }}>
+                <Apple size={14} /> Apple Reminders (ICS)
+              </button>
+              <button className="btn btn-ghost inline-flex items-center gap-1" onClick={()=>{ setShowConnect('outlook_calendar'); setConnectUrl(''); }}>
+                <Calendar size={14} className="text-[#0078D4]" /> Outlook Calendar (ICS)
+              </button>
+              <button className="btn btn-ghost inline-flex items-center gap-1" onClick={()=>{ setShowConnect('microsoft_todo'); setConnectUrl(''); }}>
+                <ListPlus size={14} className="text-[#2564EB]" /> Microsoft To Do (ICS)
+              </button>
+              <button className="btn btn-primary inline-flex items-center gap-1" onClick={()=> window.open(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/oauth/ms/start?provider=ms_graph_calendar&personId=${person.id}`, '_blank', 'width=600,height=700') }>
+                <Calendar size={14} /> Connect Outlook Calendar (OAuth)
+              </button>
+              <button className="btn btn-primary inline-flex items-center gap-1" onClick={()=> window.open(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/oauth/ms/start?provider=ms_graph_todo&personId=${person.id}`, '_blank', 'width=600,height=700') }>
+                <ListPlus size={14} /> Connect Microsoft To Do (OAuth)
+              </button>
+              <button className="btn btn-primary inline-flex items-center gap-1" onClick={()=> window.open(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/oauth/google/start?provider=google_calendar&personId=${person.id}`, '_blank', 'width=600,height=700') }>
+                <Calendar size={14} className="text-[#4285F4]" /> Connect Google Calendar (OAuth)
+              </button>
+              <button className="btn btn-primary inline-flex items-center gap-1" onClick={()=> window.open(`${process.env.NEXT_PUBLIC_API_BASE_URL || ''}/api/oauth/google/start?provider=google_tasks&personId=${person.id}`, '_blank', 'width=600,height=700') }>
+                <ListPlus size={14} className="text-[#34A853]" /> Connect Google Tasks (OAuth)
+              </button>
             </div>
             {showConnect && (
               <div className="popover mt-2">
