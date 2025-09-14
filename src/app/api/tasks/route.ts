@@ -96,7 +96,12 @@ export async function POST(req: NextRequest) {
           }
         } else if (src.provider === 'google_tasks') {
           const lists = await fetch('https://www.googleapis.com/tasks/v1/users/@me/lists', { headers }).then(r=>r.json()).catch(()=>({ items: [] as any[] }));
-          const firstListId = lists?.items?.[0]?.id;
+          let defaultListId: string | null = null;
+          try {
+            const dl = await fetch('https://www.googleapis.com/tasks/v1/users/@me/lists/@default', { headers }).then(r=>r.ok?r.json():null).catch(()=>null) as { id?: string } | null;
+            if (dl?.id) defaultListId = dl.id as string;
+          } catch {}
+          const firstListId = defaultListId || lists?.items?.[0]?.id;
           if (firstListId) {
             const bodyOut: any = { title };
             const today = new Date().toISOString().slice(0,10);

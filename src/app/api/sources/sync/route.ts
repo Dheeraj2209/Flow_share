@@ -219,9 +219,19 @@ export async function POST(req: NextRequest) {
     if (!src.access_token) return new Response('Not authorized', { status: 401 });
     const headers: HeadersInit = { Authorization: `Bearer ${src.access_token}` };
     if (src.provider === 'google_tasks') {
-      const lists: GTaskLists = await fetch('https://www.googleapis.com/tasks/v1/users/@me/lists', { headers }).then(r=>r.json());
+      const lists: GTaskLists = await fetch('https://www.googleapis.com/tasks/v1/users/@me/lists', { headers }).then(r=>r.json()).catch(()=>({ items: [] }));
+      // Try to resolve the user's default list id ("My Tasks"). '@default' is an alias that returns the real id.
+      let defaultListId: string | null = null;
+      try {
+        const dl = await fetch('https://www.googleapis.com/tasks/v1/users/@me/lists/@default', { headers }).then(r=>r.ok?r.json():null).catch(()=>null) as { id?: string } | null;
+        if (dl?.id) defaultListId = dl.id as string;
+      } catch {}
+      if (!defaultListId && lists?.items?.length) {
+        // Fall back to the first list if default lookup failed
+        defaultListId = lists.items[0].id as string;
+      }
       if (lists?.items?.length) {
-        const firstListId = lists.items[0].id as string;
+        const firstListId = defaultListId || (lists.items[0].id as string);
         for (const list of lists.items) {
           const tasks: GTasks = await fetch(`https://www.googleapis.com/tasks/v1/lists/${list.id}/tasks`, { headers }).then(r=>r.json());
           if (tasks?.items?.length) {
@@ -254,7 +264,14 @@ export async function POST(req: NextRequest) {
             body.due = t.due_time ? `${dueDate}T${t.due_time}:00.000Z` : `${dueDate}T00:00:00.000Z`;
             const created = await fetch(`https://www.googleapis.com/tasks/v1/lists/${firstListId}/tasks`, {
               method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body)
-            }).then(r=>r.ok?r.json():null).catch(()=>null) as { id?: string } | null;
+            }).then(async r=>{
+              if (!r.ok) {
+                const txt = await r.text().catch(()=> '');
+                console.error('Google Tasks create failed', r.status, txt);
+                return null;
+              }
+              return r.json();
+            }).catch(()=>null) as { id?: string } | null;
             if (created?.id) {
               await db.run(`UPDATE tasks SET source_id = COALESCE(source_id, ?), external_id = ? WHERE id = ?`, [src.id, `${firstListId}:${created.id}`, t.id]);
               const task = await db.get(`SELECT * FROM tasks WHERE id = ?`, [t.id]);
@@ -262,7 +279,8 @@ export async function POST(req: NextRequest) {
               exported.google_tasks.created++;
             }
           } else {
-            const [listId, taskId] = String(t.external_id).includes(':') ? String(t.external_id).split(':',2) : [firstListId, t.external_id];
+            const [listIdRaw, taskId] = String(t.external_id).includes(':') ? String(t.external_id).split(':',2) : [firstListId, t.external_id];
+            const listId = listIdRaw || firstListId;
             const body: any = { title: t.title };
             const today = new Date().toISOString().slice(0,10);
             const dueDate = t.due_date || today;
