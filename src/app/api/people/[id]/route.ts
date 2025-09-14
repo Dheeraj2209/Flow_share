@@ -19,13 +19,15 @@ export async function PUT(req: NextRequest, { params }: { params: { id: string }
   const name = body.name !== undefined ? String(body.name).trim() : undefined;
   const email = body.email !== undefined ? (body.email ? String(body.email).trim() : null) : undefined;
   const color = body.color !== undefined ? (body.color ? String(body.color) : null) : undefined;
+  const default_source_id = body.default_source_id !== undefined ? (body.default_source_id != null ? Number(body.default_source_id) : null) : undefined;
   const id = Number(params.id);
   const existing = await db.get(`SELECT * FROM people WHERE id = ?`, [id]);
   if (!existing) return new Response('Not found', { status: 404, headers: corsHeaders() });
   const newName = name !== undefined ? name : existing.name;
   const newEmail = email !== undefined ? email : existing.email;
   const newColor = color !== undefined ? color : existing.color;
-  await db.run(`UPDATE people SET name = ?, email = ?, color = ? WHERE id = ?`, [newName, newEmail, newColor, id]);
+  const newDefault = default_source_id !== undefined ? default_source_id : (existing as any).default_source_id ?? null;
+  await db.run(`UPDATE people SET name = ?, email = ?, color = ?, default_source_id = ? WHERE id = ?`, [newName, newEmail, newColor, newDefault, id]);
   const person = await db.get(`SELECT * FROM people WHERE id = ?`, [id]);
   broadcast('people_updated', { type: 'updated', person });
   return Response.json({ person }, { headers: corsHeaders() });

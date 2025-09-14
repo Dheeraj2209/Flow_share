@@ -80,6 +80,12 @@ export async function POST(req: NextRequest) {
   const src = await db.get(`SELECT * FROM external_sources WHERE id = ?`, [source_id]) as DbExternalSource | undefined;
   if (!src) return new Response('Source not found', { status: 404 });
   let result: { imported: number } = { imported: 0 };
+  const exported = {
+    google_tasks: { created: 0, updated: 0 },
+    google_calendar: { created: 0, updated: 0 },
+    ms_todo: { created: 0, updated: 0 },
+    ms_calendar: { created: 0, updated: 0 },
+  };
   if (src.provider === 'ms_graph_todo' || src.provider === 'ms_graph_calendar') {
     // Basic sync using stored access token; production should refresh when expired
     if (!src.access_token) return new Response('Not authorized', { status: 401 });
@@ -132,6 +138,7 @@ export async function POST(req: NextRequest) {
             }).then(r=>r.ok?r.json():null).catch(()=>null) as { id?: string } | null;
             if (created?.id) {
               await db.run(`UPDATE tasks SET external_id = ? WHERE id = ?`, [`${firstListId}:${created.id}`, t.id]);
+              exported.ms_todo.created++;
             }
           } else {
             // update
@@ -149,6 +156,7 @@ export async function POST(req: NextRequest) {
             await fetch(`https://graph.microsoft.com/v1.0/me/todo/lists/${listToUse}/tasks/${taskId}`, {
               method: 'PATCH', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body)
             }).catch(()=>{});
+            exported.ms_todo.updated++;
           }
         }
       }
@@ -194,11 +202,15 @@ export async function POST(req: NextRequest) {
             const created = await fetch(`https://graph.microsoft.com/v1.0/me/events`, {
               method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body)
             }).then(r=>r.ok?r.json():null).catch(()=>null) as { id?: string } | null;
-            if (created?.id) await db.run(`UPDATE tasks SET external_id=? WHERE id=?`, [created.id, t.id]);
+            if (created?.id) {
+              await db.run(`UPDATE tasks SET external_id=? WHERE id=?`, [created.id, t.id]);
+              exported.ms_calendar.created++;
+            }
           } else {
             await fetch(`https://graph.microsoft.com/v1.0/me/events/${t.external_id}`, {
               method: 'PATCH', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body)
             }).catch(()=>{});
+            exported.ms_calendar.updated++;
           }
         }
       }
@@ -232,7 +244,8 @@ export async function POST(req: NextRequest) {
           }
         }
         // Export local tasks to Google Tasks
-        const localTasks = await db.query(`SELECT * FROM tasks WHERE source_id = ?`, [src.id]) as any[];
+        // Include tasks already bound to this source as well as unbound tasks for this person
+        const localTasks = await db.query(`SELECT * FROM tasks WHERE (source_id = ? OR (source_id IS NULL AND person_id = ?))`, [src.id, src.person_id]) as any[];
         for (const t of localTasks) {
           if (!t.external_id) {
             const body: any = { title: t.title };
@@ -242,7 +255,12 @@ export async function POST(req: NextRequest) {
             const created = await fetch(`https://www.googleapis.com/tasks/v1/lists/${firstListId}/tasks`, {
               method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body)
             }).then(r=>r.ok?r.json():null).catch(()=>null) as { id?: string } | null;
-            if (created?.id) await db.run(`UPDATE tasks SET external_id = ? WHERE id = ?`, [`${firstListId}:${created.id}`, t.id]);
+            if (created?.id) {
+              await db.run(`UPDATE tasks SET source_id = COALESCE(source_id, ?), external_id = ? WHERE id = ?`, [src.id, `${firstListId}:${created.id}`, t.id]);
+              const task = await db.get(`SELECT * FROM tasks WHERE id = ?`, [t.id]);
+              if (task) broadcast('task_updated', { task });
+              exported.google_tasks.created++;
+            }
           } else {
             const [listId, taskId] = String(t.external_id).includes(':') ? String(t.external_id).split(':',2) : [firstListId, t.external_id];
             const body: any = { title: t.title };
@@ -252,6 +270,8 @@ export async function POST(req: NextRequest) {
             await fetch(`https://www.googleapis.com/tasks/v1/lists/${listId}/tasks/${taskId}`, {
               method: 'PATCH', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body)
             }).catch(()=>{});
+            if (t.source_id == null) await db.run(`UPDATE tasks SET source_id = ? WHERE id = ?`, [src.id, t.id]);
+            exported.google_tasks.updated++;
           }
         }
       }
@@ -283,7 +303,8 @@ export async function POST(req: NextRequest) {
         }
       }
       // Export local tasks to Google Calendar primary
-      const localTasks = await db.query(`SELECT * FROM tasks WHERE source_id = ?`, [src.id]) as any[];
+      // Include tasks already bound to this source as well as unbound tasks for this person
+      const localTasks = await db.query(`SELECT * FROM tasks WHERE (source_id = ? OR (source_id IS NULL AND person_id = ?))`, [src.id, src.person_id]) as any[];
       for (const t of localTasks) {
         const body: any = { summary: t.title };
         const today = new Date().toISOString().slice(0,10);
@@ -300,11 +321,18 @@ export async function POST(req: NextRequest) {
           const created = await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events`, {
             method: 'POST', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body)
           }).then(r=>r.ok?r.json():null).catch(()=>null) as { id?: string } | null;
-          if (created?.id) await db.run(`UPDATE tasks SET external_id=? WHERE id=?`, [created.id, t.id]);
+          if (created?.id) {
+            await db.run(`UPDATE tasks SET source_id = COALESCE(source_id, ?), external_id=? WHERE id=?`, [src.id, created.id, t.id]);
+            const task = await db.get(`SELECT * FROM tasks WHERE id = ?`, [t.id]);
+            if (task) broadcast('task_updated', { task });
+            exported.google_calendar.created++;
+          }
         } else {
           await fetch(`https://www.googleapis.com/calendar/v3/calendars/primary/events/${t.external_id}`, {
             method: 'PATCH', headers: { ...headers, 'Content-Type': 'application/json' }, body: JSON.stringify(body)
           }).catch(()=>{});
+          if (t.source_id == null) await db.run(`UPDATE tasks SET source_id = ? WHERE id = ?`, [src.id, t.id]);
+          exported.google_calendar.updated++;
         }
       }
     }
@@ -313,7 +341,7 @@ export async function POST(req: NextRequest) {
   } else {
     return new Response('No handler for provider', { status: 400 });
   }
-  return Response.json({ ok: true, result }, { headers: corsHeaders() });
+  return Response.json({ ok: true, result: { imported: result.imported, exported } }, { headers: corsHeaders() });
 }
 
 export async function OPTIONS() {

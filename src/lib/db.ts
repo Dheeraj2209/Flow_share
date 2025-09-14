@@ -173,6 +173,7 @@ async function migrate(db: DB) {
     const pcols = await db.query(`PRAGMA table_info(people)`);
     const pnames = new Set(pcols.map(c => String(c.name)));
     if (!pnames.has('color')) await db.run(`ALTER TABLE people ADD COLUMN color TEXT`);
+    if (!pnames.has('default_source_id')) await db.run(`ALTER TABLE people ADD COLUMN default_source_id INTEGER`);
   } catch {}
 }
 
@@ -181,6 +182,7 @@ export type Person = {
   name: string;
   email?: string | null;
   color?: string | null;
+  default_source_id?: number | null;
   created_at: string;
 };
 
@@ -214,4 +216,3 @@ export type ExternalSource = {
   url?: string | null;
   created_at: string;
 };
-

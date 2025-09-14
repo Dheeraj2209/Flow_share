@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { motion, AnimatePresence, Reorder, useDragControls } from "framer-motion";
-import { Calendar, Check, ChevronLeft, ChevronRight, ListPlus, Plus, Share2, UserPlus, Users, Repeat, Clock, Trash2, Pencil, User, ChevronDown, Hash, Settings2, GripVertical, BookOpen, Apple } from "lucide-react";
+import { Calendar, Check, ChevronLeft, ChevronRight, ListPlus, Plus, Share2, UserPlus, Users, Repeat, Clock, Trash2, Pencil, User, ChevronDown, Hash, Settings2, GripVertical, BookOpen, Apple, RotateCw } from "lucide-react";
 // Components
 import MiniCalendar from '@/components/MiniCalendar';
 // Types & utils
@@ -78,6 +78,13 @@ export default function Home() {
   const [sources, setSources] = useState<ExternalSource[]>([]);
   const [showConnect, setShowConnect] = useState<string | null>(null);
   const [connectUrl, setConnectUrl] = useState<string>('');
+  const [toast, setToast] = useState<string | null>(null);
+  const toastTimer = useRef<any>(null);
+  const showToast = (msg: string) => {
+    try { if (toastTimer.current) clearTimeout(toastTimer.current); } catch {}
+    setToast(msg);
+    toastTimer.current = setTimeout(() => setToast(null), 3000);
+  };
   const [editingPerson, setEditingPerson] = useState<Person | null>(null);
   const [composerHeight, setComposerHeight] = useState(0);
   const [prefsOpen, setPrefsOpen] = useState(false);
@@ -571,6 +578,7 @@ function changeAnchor(delta: number) {
                             if (selectedPerson === p.id) setSelectedPerson(null);
                           }}
                           onEdit={() => setEditingPerson(p)}
+                          onToast={showToast}
                         />
                       ))}
                     </AnimatePresence>
@@ -590,12 +598,28 @@ function changeAnchor(delta: number) {
                       </div>
                       {personDetailsOpen && (
                       <>
-                      <div className="text-xs opacity-70">Person color</div>
-                      <ColorDots value={people.find(p=>p.id===selectedPerson)?.color || null} onChange={async (c)=>{
-                        const id = selectedPerson!;
-                        await apiUpdatePerson(id, { color: c || null });
-                        setPeople(prev => prev.map(p => p.id===id ? { ...p, color: c || null } : p));
-                      }} />
+                        <div className="text-xs opacity-70">Person color</div>
+                        <ColorDots value={people.find(p=>p.id===selectedPerson)?.color || null} onChange={async (c)=>{
+                          const id = selectedPerson!;
+                          await apiUpdatePerson(id, { color: c || null });
+                          setPeople(prev => prev.map(p => p.id===id ? { ...p, color: c || null } : p));
+                        }} />
+                      <div className="mt-3">
+                        <div className="text-xs opacity-70 mb-1">Default export destination</div>
+                        <select className="border rounded-md px-2 py-1 text-sm"
+                          value={(people.find(p=>p.id===selectedPerson)?.default_source_id ?? '') as any}
+                          onChange={async (e)=>{
+                            const id = selectedPerson!;
+                            const val = e.target.value ? Number(e.target.value) : null;
+                            await apiUpdatePerson(id, { default_source_id: val });
+                            setPeople(prev => prev.map(p => p.id===id ? { ...p, default_source_id: val } : p));
+                          }}>
+                          <option value="">None</option>
+                          {sources.filter(s => s.provider.startsWith('google_') || s.provider.startsWith('ms_graph_')).map(s => (
+                            <option key={s.id} value={s.id}>{s.provider === 'google_tasks' ? 'Google Tasks' : s.provider === 'google_calendar' ? 'Google Calendar' : s.provider === 'ms_graph_todo' ? 'Microsoft To Do' : s.provider === 'ms_graph_calendar' ? 'Outlook Calendar' : s.provider}</option>
+                          ))}
+                        </select>
+                      </div>
                       <div className="mt-4">
                         <div className="text-xs opacity-70 mb-1">Connections</div>
                         <div className="flex flex-wrap gap-2">
@@ -651,8 +675,16 @@ function changeAnchor(delta: number) {
                               <div key={s.id} className="flex items-center justify-between text-xs">
                                 <span className="truncate">{s.provider.replace('_',' ')}: {s.url}</span>
                                 <button className="btn btn-ghost" onClick={async ()=>{
-                                  await apiSyncSource(s.id);
-                                  fetchAll();
+                                  try {
+                                    const res = await apiSyncSource(s.id);
+                                    const imp = (res as any)?.result?.imported ?? 0;
+                                    const exp = (res as any)?.result?.exported || {};
+                                    const totalExported = Object.values(exp).reduce((acc: number, v: any) => acc + (Number(v?.created||0) + Number(v?.updated||0)), 0);
+                                    const msg = `Synced: ${imp} imported, ${totalExported} exported`;
+                                    showToast(msg);
+                                  } finally {
+                                    fetchAll();
+                                  }
                                 }}>Sync now</button>
                               </div>
                             ))}
@@ -885,6 +917,13 @@ function changeAnchor(delta: number) {
           onClose={() => setEditingPerson(null)}
           onSaved={(p)=> setPeople(prev => prev.map(x => x.id===p.id ? p : x))}
         />
+      )}
+      {toast && (
+        <div className="fixed bottom-4 right-4 z-[9999]" role="status" aria-live="polite">
+          <div className="rounded-md px-3 py-2 bg-black text-white dark:bg-white dark:text-black shadow-lg">
+            {toast}
+          </div>
+        </div>
       )}
     </div>
   );
@@ -1236,12 +1275,35 @@ function ProgressBar({ label, color, done, total, small }: { label?: string; col
   );
 }
 
-function PersonRow({ person, active, onSelect, progress, onUpdated, onDeleted, onEdit }: { person: Person; active: boolean; onSelect: () => void; progress: {done:number,total:number}; onUpdated: (p: Person)=>void; onDeleted: ()=>void; onEdit: ()=>void; }) {
+function PersonRow({ person, active, onSelect, progress, onUpdated, onDeleted, onEdit, onToast }: { person: Person; active: boolean; onSelect: () => void; progress: {done:number,total:number}; onUpdated: (p: Person)=>void; onDeleted: ()=>void; onEdit: ()=>void; onToast: (msg: string) => void; }) {
   const color = person.color || hashToHsl(person.id);
+  const [syncing, setSyncing] = useState(false);
   async function remove() {
     if (!confirm('Delete person? Their tasks will be unassigned.')) return;
     await apiDeletePerson(person.id);
     onDeleted();
+  }
+  async function syncAll() {
+    if (syncing) return;
+    setSyncing(true);
+    try {
+      const data = await apiGetSources(person.id).catch(() => ({ sources: [] as ExternalSource[] }));
+      const list: ExternalSource[] = (data as any)?.sources || [];
+      if (!list.length) { onToast('No connections to sync'); return; }
+      const results = await Promise.allSettled(list.map(s => apiSyncSource(s.id)));
+      let imported = 0; let exported = 0;
+      for (const r of results) {
+        if (r.status === 'fulfilled') {
+          const imp = (r.value as any)?.result?.imported ?? 0;
+          const exp = (r.value as any)?.result?.exported || {};
+          const tot = Object.values(exp).reduce((acc: number, v: any) => acc + (Number((v as any)?.created||0) + Number((v as any)?.updated||0)), 0);
+          imported += Number(imp)||0; exported += Number(tot)||0;
+        }
+      }
+      onToast(`Synced ${list.length} sources: ${imported} imported, ${exported} exported`);
+    } finally {
+      setSyncing(false);
+    }
   }
   return (
     <motion.li layout initial={{opacity:0, y:4}} animate={{opacity:1, y:0}} exit={{opacity:0, y:-4}}>
@@ -1251,6 +1313,9 @@ function PersonRow({ person, active, onSelect, progress, onUpdated, onDeleted, o
             <span className="text-[10px] font-semibold text-white mix-blend-difference">{person.name.slice(0,1).toUpperCase()}</span>
           </span>
           <span className="truncate">{person.name}</span>
+        </button>
+        <button className="btn btn-ghost" title="Sync all sources" aria-label="Sync all sources" aria-busy={syncing} onClick={syncAll}>
+          <RotateCw size={14} className={syncing ? 'animate-spin' : ''} />
         </button>
         <button className="btn btn-ghost" title="Edit" onClick={onEdit}><Pencil size={14} /></button>
         <button className="btn btn-ghost text-red-600" title="Delete" onClick={remove}><Trash2 size={14} /></button>
@@ -1347,6 +1412,7 @@ function PersonModal({ person, onClose, onSaved }: { person: Person; onClose: ()
   const [connectUrl, setConnectUrl] = useState('');
   const [editingSourceId, setEditingSourceId] = useState<number | null>(null);
   const [editingSourceUrl, setEditingSourceUrl] = useState<string>('');
+  const [defaultSourceId, setDefaultSourceId] = useState<number | null>((person as any).default_source_id ?? null);
   useEffect(() => {
     apiGetSources(person.id).then(d=> setSources(d.sources||[])).catch(()=>setSources([]));
   }, [person.id]);
@@ -1370,6 +1436,21 @@ function PersonModal({ person, onClose, onSaved }: { person: Person; onClose: ()
           <div className="flex items-center gap-2">
             <label className="text-sm w-20">Color</label>
             <ColorDots value={color} onChange={setColor} />
+          </div>
+          <div className="flex items-center gap-2">
+            <label className="text-sm w-20">Default export</label>
+            <select className="border rounded-md px-2 py-1 flex-1 text-sm" value={(defaultSourceId ?? '') as any}
+              onChange={async (e)=>{
+                const val = e.target.value ? Number(e.target.value) : null;
+                setDefaultSourceId(val);
+                const data = await apiUpdatePerson(person.id, { default_source_id: val });
+                if ((data as any)?.person) onSaved((data as any).person);
+              }}>
+              <option value="">None</option>
+              {sources.filter(s => s.provider.startsWith('google_') || s.provider.startsWith('ms_graph_')).map(s => (
+                <option key={s.id} value={s.id}>{s.provider === 'google_tasks' ? 'Google Tasks' : s.provider === 'google_calendar' ? 'Google Calendar' : s.provider === 'ms_graph_todo' ? 'Microsoft To Do' : s.provider === 'ms_graph_calendar' ? 'Outlook Calendar' : s.provider}</option>
+              ))}
+            </select>
           </div>
           <div>
             <div className="text-xs opacity-70 mb-1">Connections</div>
@@ -1436,7 +1517,14 @@ function PersonModal({ person, onClose, onSaved }: { person: Person; onClose: ()
                     ) : (
                       <>
                         <button className="btn btn-ghost" onClick={async ()=>{
-                          await apiSyncSource(s.id);
+                          try {
+                            const res = await apiSyncSource(s.id);
+                            const imp = (res as any)?.result?.imported ?? 0;
+                            const exp = (res as any)?.result?.exported || {};
+                            const totalExported = Object.values(exp).reduce((acc: number, v: any) => acc + (Number(v?.created||0) + Number(v?.updated||0)), 0);
+                            const msg = `Synced: ${imp} imported, ${totalExported} exported`;
+                            showToast(msg);
+                          } finally {}
                         }}>Sync now</button>
                         <button className="btn btn-ghost" onClick={()=>{ setEditingSourceId(s.id); setEditingSourceUrl(s.url || ''); }}>Edit</button>
                         <button className="btn btn-ghost text-red-600" onClick={async ()=>{

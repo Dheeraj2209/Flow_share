@@ -3,6 +3,7 @@ export type Person = {
   name: string;
   email?: string | null;
   color?: string | null;
+  default_source_id?: number | null;
 };
 
 export type Task = {
@@ -38,4 +39,3 @@ export type UserPrefs = {
   timeFormat: '12h' | '24h';
   dateFormat: 'YYYY-MM-DD' | 'MM/DD' | 'DD/MM';
 };
-

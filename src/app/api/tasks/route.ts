@@ -53,7 +53,11 @@ export async function POST(req: NextRequest) {
 
   // Optional: create on external provider if source_id is provided
   try {
-    const source_id = body.source_id != null ? Number(body.source_id) : null;
+    let source_id = body.source_id != null ? Number(body.source_id) : null;
+    if (!source_id && person_id != null) {
+      const person = await db.get(`SELECT default_source_id FROM people WHERE id = ?`, [person_id]) as any | undefined;
+      if (person?.default_source_id) source_id = Number(person.default_source_id);
+    }
     if (source_id) {
       const src = await db.get(`SELECT * FROM external_sources WHERE id = ?`, [source_id]) as any | undefined;
       if (src?.access_token) {
