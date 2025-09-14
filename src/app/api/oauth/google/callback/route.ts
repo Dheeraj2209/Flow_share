@@ -1,11 +1,12 @@
 import { NextRequest } from 'next/server';
+import { getPublicOrigin } from '@/lib/urls';
 import { getDb } from '@/lib/db';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
-  const { searchParams, origin } = new URL(req.url);
+  const { searchParams } = new URL(req.url);
   const code = searchParams.get('code');
   const stateRaw = searchParams.get('state');
   if (!code || !stateRaw) return new Response('Missing code/state', { status: 400 });
@@ -14,6 +15,7 @@ export async function GET(req: NextRequest) {
   const provider = String(state.provider || 'google_tasks');
   const clientId = process.env.GOOGLE_CLIENT_ID!;
   const clientSecret = process.env.GOOGLE_CLIENT_SECRET!;
+  const origin = getPublicOrigin(req);
   const redirectUri = `${origin}/api/oauth/google/callback`;
   const tokenEndpoint = 'https://oauth2.googleapis.com/token';
   const body = new URLSearchParams({
@@ -43,4 +45,3 @@ export async function GET(req: NextRequest) {
   );
   return new Response('<script>window.close && window.close();</script> Connected. You can close this window.', { headers: { 'Content-Type': 'text/html' } });
 }
-

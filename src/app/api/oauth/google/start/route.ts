@@ -1,14 +1,16 @@
 import { NextRequest } from 'next/server';
+import { getPublicOrigin } from '@/lib/urls';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
-  const { searchParams, origin } = new URL(req.url);
+  const { searchParams } = new URL(req.url);
   const personId = searchParams.get('personId') || '';
   const provider = searchParams.get('provider') || 'google_tasks';
   const clientId = process.env.GOOGLE_CLIENT_ID;
   if (!clientId) return new Response('GOOGLE_CLIENT_ID missing', { status: 500 });
+  const origin = getPublicOrigin(req);
   const redirectUri = `${origin}/api/oauth/google/callback`;
   const scopes = provider === 'google_calendar'
     ? [
@@ -29,4 +31,3 @@ export async function GET(req: NextRequest) {
   url.searchParams.set('state', JSON.stringify({ personId, provider }));
   return Response.redirect(url.toString(), 302);
 }
-

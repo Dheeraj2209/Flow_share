@@ -1,11 +1,12 @@
 import { NextRequest } from 'next/server';
 import { getDb } from '@/lib/db';
+import { getPublicOrigin } from '@/lib/urls';
 
 export const runtime = 'nodejs';
 export const dynamic = 'force-dynamic';
 
 export async function GET(req: NextRequest) {
-  const { searchParams, origin } = new URL(req.url);
+  const { searchParams } = new URL(req.url);
   const code = searchParams.get('code');
   const stateRaw = searchParams.get('state');
   if (!code || !stateRaw) return new Response('Missing code/state', { status: 400 });
@@ -15,6 +16,7 @@ export async function GET(req: NextRequest) {
   const clientId = process.env.MS_CLIENT_ID!;
   const clientSecret = process.env.MS_CLIENT_SECRET!;
   const tenant = process.env.MS_TENANT_ID || 'common';
+  const origin = getPublicOrigin(req);
   const redirectUri = `${origin}/api/oauth/ms/callback`;
   const tokenEndpoint = `https://login.microsoftonline.com/${tenant}/oauth2/v2.0/token`;
   const body = new URLSearchParams({
